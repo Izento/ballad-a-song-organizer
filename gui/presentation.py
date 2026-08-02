@@ -42,7 +42,18 @@ class DisplayRow:
 
 
 def _action_label(item, default: str) -> str:
+    if getattr(item, "artwork_after", None) is not None:
+        return "Review cover art" if requires_review(item) else "Cover art + metadata"
     return "Needs review" if requires_review(item) else default
+
+
+def _tag_proposed_display(item) -> str:
+    values = tag_display(item.after)
+    if item.artwork_after is None:
+        return values
+    album = str(item.after.get("album") or "").strip()
+    artwork = f"Embed cover art: {album}" if album else "Embed cover art"
+    return " / ".join(value for value in (values, artwork) if value)
 
 
 def plan_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
@@ -75,7 +86,7 @@ def plan_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
                 ),
                 path=item.path,
                 current=tag_display(item.before),
-                proposed=tag_display(item.after),
+                proposed=_tag_proposed_display(item),
                 confidence=(
                     "review" if requires_review(item) else item.confidence
                 ),

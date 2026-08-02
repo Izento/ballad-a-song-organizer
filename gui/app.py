@@ -35,9 +35,10 @@ from renamer.runtime import (
 )
 from renamer.selection import (
     action_items as _action_items,
+    artwork_ids as _artwork_ids,
     expand_group_selection as _expand_group_selection,
     grouped_action_ids as _grouped_action_ids,
-    ready_ids as _ready_ids,
+    is_high_confidence_action as _is_high_confidence_action,
     recommended_ids as _recommended_ids,
     requires_review as _requires_review,
 )
@@ -62,6 +63,19 @@ _PRIMARY_BUTTON_DISABLED_FG = "#d3f4dc"
 _ACTIVITY_SIDEBAR_WIDTH = 320
 _ACTIVITY_COLLAPSED_WIDTH = 82
 _SHIFT_MASK = 0x0001
+_SHARED_ARTWORK_PREVIEW_LIMIT = 8
+_SHARED_ARTWORK_NAMES = {
+    "albumart.jpg",
+    "albumartsmall.jpg",
+    "cover.jpg",
+    "cover.png",
+    "folder.jpg",
+    "folder.jpeg",
+    "folder.png",
+    "front.jpg",
+    "front.png",
+}
+_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
 # Rows worth a second look shouldn't blend in with everything that's safe to
 # accept at a glance. "review" and "error" share the "low" styling because
 # they represent the same thing to a user scanning the grid: don't trust
@@ -89,6 +103,21 @@ def _format_progress_log(
 ) -> str:
     location = path or "working"
     return f"{stage}: {current}/{total}  {location}"
+
+
+def _shared_folder_artwork(folder: str) -> tuple[Path, ...]:
+    """Find player-wide fallback images directly inside a selected folder."""
+    candidates = []
+    for path in Path(folder).iterdir():
+        name = path.name.casefold()
+        generated_album_art = (
+            name.startswith("albumart_") and path.suffix.casefold() in _IMAGE_EXTENSIONS
+        )
+        if path.is_file() and (
+            name in _SHARED_ARTWORK_NAMES or generated_album_art
+        ):
+            candidates.append(path)
+    return tuple(sorted(candidates, key=lambda path: path.name.casefold()))
 
 
 class _Tooltip:
@@ -404,6 +433,7 @@ class SongOrganizerApp:
         self.notebook = ttk.Notebook(content)
         self.notebook.grid(row=0, column=0, sticky=tk.NSEW)
         self.trees: dict[str, ttk.Treeview] = {}
+        self.tabs: dict[str, ttk.Frame] = {}
         for key, title in (
             ("renames", "Filename changes"),
             ("tags", "Metadata changes"),
@@ -412,6 +442,7 @@ class SongOrganizerApp:
         ):
             frame = ttk.Frame(self.notebook, padding=6)
             self.notebook.add(frame, text=title)
+            self.tabs[key] = frame
             tree = self._make_tree(frame, key)
             self.trees[key] = tree
 
@@ -431,6 +462,11 @@ class SongOrganizerApp:
             selection_controls,
             text="Select all ready",
             command=self._select_all,
+        ).pack(side=tk.LEFT, padx=(8, 0))
+        ttk.Button(
+            selection_controls,
+            text="Select missing artwork",
+            command=self._select_artwork,
         ).pack(side=tk.LEFT, padx=(8, 0))
         self.edit_button = ttk.Button(
             selection_controls,
@@ -710,6 +746,46 @@ class SongOrganizerApp:
         if selected:
             self.folder_var.set(selected)
 
+    def _resolve_shared_folder_artwork(
+        self,
+        folder: str,
+    ) -> tuple[Path, ...] | None:
+        artwork = _shared_folder_artwork(folder)
+        if not artwork:
+            return ()
+        preview = artwork[:_SHARED_ARTWORK_PREVIEW_LIMIT]
+        names = "\n".join(f"• {path.name}" for path in preview)
+        remaining = len(artwork) - len(preview)
+        if remaining:
+            names += f"\n• …and {remaining} more"
+        remove = messagebox.askyesnocancel(
+            "Shared folder artwork detected",
+            f"Ballad found {len(artwork)} artwork file(s) that media players "
+            "can display for "
+            "every song in this folder when a track has no embedded cover:\n\n"
+            f"{names}\n\n"
+            "Remove these shared images before analysis?\n\n"
+            "Yes: permanently delete them and continue\n"
+            "No: keep them and continue\n"
+            "Cancel: stop",
+        )
+        if remove is None:
+            return None
+        if not remove:
+            return ()
+        removed = []
+        try:
+            for path in artwork:
+                path.unlink()
+                removed.append(path)
+        except OSError as exc:
+            messagebox.showerror(
+                "Could not remove shared artwork",
+                f"Ballad could not remove {path.name}:\n\n{exc}",
+            )
+            return None
+        return tuple(removed)
+
     def _sync_fingerprint_availability(self, *_args, busy: bool | None = None) -> None:
         """Audio fingerprinting only matters while duplicate checking runs.
 
@@ -772,11 +848,19 @@ class SongOrganizerApp:
             "always read-only.\n\nContinue?",
         ):
             return
+        removed_artwork = self._resolve_shared_folder_artwork(folder)
+        if removed_artwork is None:
+            return
         self.plan = None
         self.selected_ids.clear()
         self._applied_group_ids = set()
         self._clear_trees()
         self._clear_activity_log()
+        if removed_artwork:
+            self._append_activity_log(
+                "Removed shared folder artwork: "
+                + ", ".join(path.name for path in removed_artwork)
+            )
         self._append_activity_log(f"Starting analysis: {folder}")
         self._set_busy(True)
         self.status_var.set("Organizing library…")
@@ -921,7 +1005,7 @@ class SongOrganizerApp:
                 for item in actions
             )
             if not actions and self.plan.issues:
-                self.notebook.select(self.trees["errors"].master)
+                self.notebook.select(self.tabs["errors"])
                 self.status_var.set(
                     f"No proposed changes found; {len(self.plan.issues)} "
                     "file(s) failed analysis."
@@ -1393,24 +1477,65 @@ class SongOrganizerApp:
             self._set_selected_ids(self.selected_ids | grouped_ids)
         return "break"
 
+    def _active_action_scope(self) -> tuple[str, tuple] | None:
+        active_tab = str(self.notebook.select())
+        if active_tab == str(self.tabs["renames"]):
+            return "filename", tuple(self.plan.rename_proposals)
+        if active_tab == str(self.tabs["tags"]):
+            return "metadata", tuple(self.plan.tag_proposals)
+        self.status_var.set(
+            "Open Filename changes or Metadata changes before selecting changes."
+        )
+        return None
+
     def _select_recommended(self) -> None:
         if self.plan is None:
             return
-        recommended = _recommended_ids(self.plan)
-        self._set_selected_ids(recommended)
+        scope = self._active_action_scope()
+        if scope is None:
+            return
+        scope_name, items = scope
+        recommended = {
+            item.id for item in items if _is_high_confidence_action(item)
+        }
+        self._set_selected_ids(recommended, expand_groups=False)
         self.status_var.set(
-            f"Selected {self._selection_group_count()} recommended songs."
+            f"Selected {len(recommended)} recommended {scope_name} change(s)."
         )
 
     def _select_all(self) -> None:
         if self.plan is None:
             return
-        selected = _ready_ids(self.plan)
-        self._set_selected_ids(selected)
-        skipped = len(_grouped_action_ids(self.plan)) - self._selection_group_count()
+        scope = self._active_action_scope()
+        if scope is None:
+            return
+        scope_name, items = scope
+        selected = {
+            item.id
+            for item in items
+            if item.apply_eligible and not item.requires_review
+        }
+        self._set_selected_ids(selected, expand_groups=False)
+        skipped = len(items) - len(selected)
         self.status_var.set(
-            f"Selected {self._selection_group_count()} ready songs; "
-            f"{skipped} need review."
+            f"Selected {len(selected)} ready {scope_name} change(s); "
+            f"{skipped} need review or are blocked."
+        )
+
+    def _select_artwork(self) -> None:
+        if self.plan is None:
+            return
+        artwork = _artwork_ids(self.plan)
+        self._set_selected_ids(artwork, expand_groups=False)
+        selected_artwork = len(self.selected_ids & artwork)
+        skipped = sum(
+            item.artwork_after is not None and not item.apply_eligible
+            for item in self.plan.tag_proposals
+        )
+        self.notebook.select(self.tabs["tags"])
+        self.status_var.set(
+            f"Selected {selected_artwork} verified cover-art change(s)"
+            + (f"; {skipped} blocking item(s) skipped." if skipped else ".")
         )
 
     def _edit_selected_filename(self) -> None:
@@ -1509,7 +1634,7 @@ class SongOrganizerApp:
             self._set_selected_ids(self.selected_ids - {proposal.id})
         self.status_var.set(f"Corrected proposed filename to {filename}.")
 
-    def _set_selected_ids(self, selected_ids) -> None:
+    def _set_selected_ids(self, selected_ids, *, expand_groups: bool = True) -> None:
         plan = getattr(self, "plan", None)
         selected = (
             _expand_group_selection(
@@ -1517,7 +1642,7 @@ class SongOrganizerApp:
                 selected_ids,
                 include_review=True,
             )
-            if plan is not None
+            if plan is not None and expand_groups
             else set(selected_ids)
         )
         if plan is not None:

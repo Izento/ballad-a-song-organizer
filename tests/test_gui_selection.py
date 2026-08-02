@@ -30,6 +30,7 @@ class _FakeTree:
     def __init__(self, rows, selected=()):
         self.rows = rows
         self.selected = tuple(selected)
+        self.master = None
 
     def get_children(self, _parent=""):
         return tuple(self.rows)
@@ -70,7 +71,7 @@ class _FakeTree:
         return {"values": self.rows[row]}
 
 
-def test_select_all_selects_only_actionable_proposals(tmp_path):
+def test_select_all_only_affects_the_active_metadata_tab(tmp_path):
     source = tmp_path / "old.mp3"
     source.write_bytes(b"audio")
     snapshot = FileSnapshot.capture(str(source))
@@ -84,6 +85,7 @@ def test_select_all_selects_only_actionable_proposals(tmp_path):
         proposed_values={"filename": "new.mp3"},
         confidence="high",
         reason="test",
+        warnings=("Destination collides with another proposal.",),
     )
     tag = TagProposal(
         id="tag-1",
@@ -112,12 +114,14 @@ def test_select_all_selects_only_actionable_proposals(tmp_path):
         "renames": _FakeTree({"shared-row": ("☐",)}),
         "tags": _FakeTree({"shared-row": ("☐",)}),
     }
+    app.tabs = {"renames": "renames-frame", "tags": "tags-frame"}
+    app.notebook = SimpleNamespace(select=lambda: "tags-frame")
     app.status_var = _FakeStatus()
 
     app._select_all()
 
-    assert app.selected_ids == {rename.id, tag.id}
-    assert app.trees["renames"].rows["shared-row"][0] == "☑"
+    assert app.selected_ids == {tag.id}
+    assert app.trees["renames"].rows["shared-row"][0] == "☐"
     assert app.trees["tags"].rows["shared-row"][0] == "☑"
 
 
@@ -260,6 +264,8 @@ def test_select_all_ready_skips_destination_collisions(tmp_path):
         ),
         "tags": _FakeTree({}),
     }
+    app.tabs = {"renames": "renames-frame", "tags": "tags-frame"}
+    app.notebook = SimpleNamespace(select=lambda: "renames-frame")
     app.status_var = _FakeStatus()
 
     app._select_all()
@@ -413,6 +419,131 @@ def test_tag_display_uses_compact_artist_title_values():
     assert gui_app._tag_display({"title": "Song"}) == "Song"
 
 
+def test_shared_artwork_guard_removes_only_player_fallbacks(
+    tmp_path,
+    monkeypatch,
+):
+    folder_art = tmp_path / "folder.jpg"
+    generated_art = tmp_path / "AlbumArt_deadbeef_Large.jpg"
+    unrelated_art = tmp_path / "concert-poster.jpg"
+    for path in (folder_art, generated_art, unrelated_art):
+        path.write_bytes(b"image")
+    monkeypatch.setattr(gui_app.messagebox, "askyesnocancel", lambda *_args, **_kwargs: True)
+    app = SongOrganizerApp.__new__(SongOrganizerApp)
+
+    removed = app._resolve_shared_folder_artwork(str(tmp_path))
+
+    assert removed == (generated_art, folder_art)
+    assert not folder_art.exists()
+    assert not generated_art.exists()
+    assert unrelated_art.exists()
+
+
+def test_shared_artwork_dialog_caps_the_filename_preview(tmp_path, monkeypatch):
+    artwork = [
+        tmp_path / f"AlbumArt_{index:02d}_Large.jpg"
+        for index in range(12)
+    ]
+    for path in artwork:
+        path.write_bytes(b"image")
+    prompts = []
+
+    def decline_removal(_title, message):
+        prompts.append(message)
+        return False
+
+    monkeypatch.setattr(gui_app.messagebox, "askyesnocancel", decline_removal)
+    app = SongOrganizerApp.__new__(SongOrganizerApp)
+
+    removed = app._resolve_shared_folder_artwork(str(tmp_path))
+
+    assert removed == ()
+    assert "found 12 artwork file(s)" in prompts[0]
+    assert "…and 4 more" in prompts[0]
+    assert artwork[7].name in prompts[0]
+    assert artwork[8].name not in prompts[0]
+
+
+def test_cover_art_proposal_is_visible_in_metadata_review(tmp_path):
+    source = tmp_path / "Artist - Song.mp3"
+    source.write_bytes(b"audio")
+    proposal = TagProposal(
+        id="tag-artwork",
+        decision_group_id="group-artwork",
+        snapshot=FileSnapshot.capture(str(source)),
+        path=str(source),
+        before={"artist": "Artist", "title": "Song"},
+        after={"artist": "Artist", "title": "Song", "album": "The Album"},
+        confidence="medium",
+        reason="verified release",
+        artwork_after={
+            "path": str(tmp_path / "cover.jpg"),
+            "sha256": "abc",
+            "size": 3,
+            "mime_type": "image/jpeg",
+            "release_id": "release",
+        },
+    )
+    plan = ReviewPlan.create(
+        str(tmp_path),
+        False,
+        tag_proposals=[proposal],
+    )
+
+    row = gui_app.plan_rows(plan)[0]
+
+    assert row.action == "Cover art + metadata"
+    assert "Embed cover art: The Album" in row.proposed
+
+
+def test_select_missing_artwork_includes_medium_confidence_proposals(tmp_path):
+    source = tmp_path / "Artist - Song.mp3"
+    source.write_bytes(b"audio")
+    proposal = TagProposal(
+        id="tag-artwork",
+        decision_group_id="group-artwork",
+        snapshot=FileSnapshot.capture(str(source)),
+        path=str(source),
+        before={"artist": "Artist", "title": "Song"},
+        after={"artist": "Artist", "title": "Song", "album": "The Album"},
+        confidence="medium",
+        reason="verified release",
+        artwork_after={
+            "path": str(tmp_path / "cover.jpg"),
+            "sha256": "abc",
+            "size": 3,
+            "mime_type": "image/jpeg",
+            "release_id": "release",
+        },
+    )
+    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app.plan = ReviewPlan.create(
+        str(tmp_path),
+        False,
+        tag_proposals=[proposal],
+    )
+    app.selected_ids = set()
+    app._row_ids = {("tags", "artwork-row"): proposal.id}
+    app._applied_group_ids = set()
+    tags = _FakeTree({"artwork-row": ("☐",)})
+    tags.master = "tags-frame"
+    app.trees = {
+        "renames": _FakeTree({}),
+        "tags": tags,
+    }
+    app.tabs = {"tags": "tags-frame"}
+    selected_tabs = []
+    app.notebook = SimpleNamespace(select=selected_tabs.append)
+    app.status_var = _FakeStatus()
+
+    app._select_artwork()
+
+    assert app.selected_ids == {proposal.id}
+    assert tags.rows["artwork-row"][0] == "☑"
+    assert selected_tabs == ["tags-frame"]
+    assert app.status_var.value == "Selected 1 verified cover-art change(s)."
+
+
 def test_duplicate_finding_renders_each_path():
     app = SongOrganizerApp.__new__(SongOrganizerApp)
     rendered = []
@@ -448,7 +579,7 @@ def test_duplicate_finding_renders_each_path():
     ]
 
 
-def test_select_recommended_allows_expected_paired_repairs(tmp_path):
+def test_select_recommended_only_affects_the_active_metadata_tab(tmp_path):
     source = tmp_path / "Artist - Song (feat. Guest).mp3"
     source.write_bytes(b"audio")
     snapshot = FileSnapshot.capture(str(source))
@@ -462,6 +593,7 @@ def test_select_recommended_allows_expected_paired_repairs(tmp_path):
         proposed_values={"filename": "Artist - Song (feat. Guest).mp3"},
         confidence="high",
         reason="test",
+        warnings=("Destination collides with another proposal.",),
     )
     tag = TagProposal(
         id="tag-1",
@@ -503,7 +635,34 @@ def test_select_recommended_allows_expected_paired_repairs(tmp_path):
         tag_proposals=[tag],
     )
 
-    assert gui_app._recommended_ids(plan) == {rename.id, tag.id}
+    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app.plan = plan
+    app.selected_ids = set()
+    app._row_ids = {
+        ("renames", "rename-row"): rename.id,
+        ("renames", "low-row"): low_confidence_rename.id,
+        ("renames", "unsafe-row"): unsafe_rename.id,
+        ("tags", "tag-row"): tag.id,
+    }
+    app.trees = {
+        "renames": _FakeTree(
+            {
+                "rename-row": ("☐",),
+                "low-row": ("☐",),
+                "unsafe-row": ("☐",),
+            }
+        ),
+        "tags": _FakeTree({"tag-row": ("☐",)}),
+    }
+    app.tabs = {"renames": "renames-frame", "tags": "tags-frame"}
+    app.notebook = SimpleNamespace(select=lambda: "tags-frame")
+    app.status_var = _FakeStatus()
+
+    app._select_recommended()
+
+    assert app.selected_ids == {tag.id}
+    assert app.trees["renames"].rows["rename-row"][0] == "☐"
+    assert app.trees["tags"].rows["tag-row"][0] == "☑"
 
 
 def test_edit_selected_filename_updates_plan_and_selection(tmp_path, monkeypatch):

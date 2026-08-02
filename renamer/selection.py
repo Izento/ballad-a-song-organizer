@@ -92,6 +92,15 @@ def recommended_ids(plan: ReviewPlan) -> set[str]:
     }
 
 
+def artwork_ids(plan: ReviewPlan) -> set[str]:
+    """Return applyable tag proposals that embed verified missing artwork."""
+    return {
+        item.id
+        for item in plan.tag_proposals
+        if item.artwork_after is not None and item.apply_eligible
+    }
+
+
 def eligible_ids(items: Iterable, *, include_review: bool = False) -> list[str]:
     return [
         item.id
@@ -103,6 +112,7 @@ def eligible_ids(items: Iterable, *, include_review: bool = False) -> list[str]:
 
 __all__ = [
     "action_items",
+    "artwork_ids",
     "eligible_ids",
     "expand_group_selection",
     "grouped_action_ids",
