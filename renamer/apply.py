@@ -5,13 +5,16 @@ from __future__ import annotations
 import json
 import hashlib
 import os
+import re
 import shutil
 import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Iterable
 
-from .media import read_media
+from .domain.metadata import artwork_to_dict
+from .media import read_front_artwork, read_media
+from .media.schema import metadata_matches
 from .review_models import (
     ApplyResult,
     RenameProposal,
@@ -22,14 +25,21 @@ from .review_models import (
     sha256_file,
 )
 from .runtime import atomic_write_json, ensure_app_dirs
-from .tag_writer import supports_tag_writing, write_tags_to_file
+from .tag_writer import write_tags_to_file
+from .transactions import (
+    ApplyBlocked,
+    TransactionState,
+    group_transactions,
+    restore_metadata_snapshot,
+)
+from .transactions.preflight import (
+    preflight as transaction_preflight,
+    selected_proposals as transaction_selected_proposals,
+)
+from .transactions.journal import TransactionJournal
 
 
 ProgressCallback = Callable[[str, int, int, ApplyResult | None], None]
-
-
-class ApplyBlocked(RuntimeError):
-    """Raised when a reviewed batch cannot pass its global preflight."""
 
 
 def _error_details(exc: BaseException) -> tuple[int | None, int | None]:
@@ -53,14 +63,23 @@ def _same_path(left: str, right: str) -> bool:
     return path_key(left) == path_key(right)
 
 
-def _retry_filesystem(operation, attempts: int = 3):
+def _retry_filesystem(operation, attempts: int = 6):
+    """Retry past transient Windows sharing violations (winerror 32/33).
+
+    Antivirus and search-indexer scans commonly hold a brief lock on a file
+    right after it is written or renamed. A short, fixed backoff can run out
+    before the lock clears, permanently stranding an apply/undo action even
+    though retrying moments later would succeed. Backoff grows and is capped
+    rather than fixed, to tolerate longer scans without hanging forever on a
+    truly locked file.
+    """
     for attempt in range(attempts):
         try:
             return operation()
         except OSError as exc:
             if getattr(exc, "winerror", None) not in {32, 33} or attempt == attempts - 1:
                 raise
-            time.sleep(0.25 * (attempt + 1))
+            time.sleep(min(0.25 * (2**attempt), 2.0))
 
 
 def _rename_with_retry(source: str, destination: str) -> None:
@@ -81,278 +100,115 @@ def _blocked_result(item_id: str, path: str, message: str) -> ApplyResult:
     )
 
 
-def _selected_proposals(
-    plan: ReviewPlan, selected_ids: Iterable[str]
-) -> tuple[list[RenameProposal], list[TagProposal]]:
-    selected = set(selected_ids)
-    renames = [item for item in plan.rename_proposals if item.id in selected]
-    tags = [item for item in plan.tag_proposals if item.id in selected]
-    unknown = selected - {item.id for item in renames + tags}
-    if unknown:
-        raise ApplyBlocked(f"Unknown proposal IDs: {', '.join(sorted(unknown))}")
-    return renames, tags
-
-
-def _preflight(
-    renames: list[RenameProposal],
-    tags: list[TagProposal],
-) -> tuple[list[RenameProposal], list[TagProposal], list[ApplyResult]]:
-    blocked: dict[str, ApplyResult] = {}
-
-    def block(item_id: str, path: str, message: str) -> None:
-        blocked.setdefault(item_id, _blocked_result(item_id, path, message))
-
-    for item in renames:
-        if not os.path.isfile(item.old_path):
-            block(item.id, item.old_path, f"Source file is missing: {item.old_path}")
-        elif not item.snapshot.matches(item.old_path):
-            block(
-                item.id,
-                item.old_path,
-                f"Source changed since analysis: {item.old_path}",
-            )
-
-    for item in tags:
-        if not os.path.isfile(item.path):
-            block(item.id, item.path, f"Tag source is missing: {item.path}")
-        elif not item.snapshot.matches(item.path):
-            block(
-                item.id,
-                item.path,
-                f"Tag source changed since analysis: {item.path}",
-            )
-        elif not supports_tag_writing(item.path):
-            extension = Path(item.path).suffix.lower() or "this file type"
-            block(
-                item.id,
-                item.path,
-                f"Tag writing is not supported for {extension} files.",
-            )
-    rename_sources: dict[str, list[RenameProposal]] = {}
-    for item in renames:
-        if item.id not in blocked:
-            rename_sources.setdefault(path_key(item.old_path), []).append(item)
-    for items in rename_sources.values():
-        if len(items) > 1:
-            for item in items:
-                block(
-                    item.id,
-                    item.old_path,
-                    "Multiple rename proposals target one source file.",
-                )
-
-    tag_sources: dict[str, list[TagProposal]] = {}
-    for item in tags:
-        if item.id not in blocked:
-            tag_sources.setdefault(path_key(item.path), []).append(item)
-    for items in tag_sources.values():
-        if len(items) > 1:
-            for item in items:
-                block(
-                    item.id,
-                    item.path,
-                    "Multiple tag proposals target one source file.",
-                )
-
-    eligible_tags = [item for item in tags if item.id not in blocked]
-    if eligible_tags:
-        try:
-            backup_root = ensure_app_dirs()["backups"]
-            required = sum(os.path.getsize(item.path) for item in eligible_tags)
-            free = shutil.disk_usage(backup_root).free
-        except OSError as exc:
-            message = f"Cannot inspect backup space: {exc}"
-            for item in eligible_tags:
-                block(item.id, item.path, message)
-        else:
-            if free < required:
-                message = (
-                    f"Insufficient free space for tag backups "
-                    f"({required} bytes needed)"
-                )
-                for item in eligible_tags:
-                    block(item.id, item.path, message)
-
-    rename_destinations: dict[str, RenameProposal] = {}
-    for item in renames:
-        if item.id in blocked:
-            continue
-        destination_key = path_key(item.new_path)
-        if destination_key in rename_destinations:
-            other = rename_destinations[destination_key]
-            message = f"Multiple selected proposals target {item.new_path}"
-            block(other.id, other.old_path, message)
-            block(item.id, item.old_path, message)
-            continue
-        rename_destinations[destination_key] = item
-
-    changed = True
-    while changed:
-        changed = False
-        source_keys = {
-            path_key(item.old_path)
-            for item in renames
-            if item.id not in blocked
-        }
-        for item in renames:
-            if item.id in blocked:
-                continue
-            parent = Path(item.new_path).parent
-            if not parent.is_dir():
-                block(
-                    item.id,
-                    item.old_path,
-                    f"Destination folder does not exist: {parent}",
-                )
-                changed = True
-                continue
-            try:
-                existing_keys = {
-                    path_key(str(candidate))
-                    for candidate in parent.iterdir()
-                    if candidate.exists()
-                }
-            except OSError as exc:
-                block(
-                    item.id,
-                    item.old_path,
-                    f"Cannot inspect destination folder: {exc}",
-                )
-                changed = True
-                continue
-            destination_key = path_key(item.new_path)
-            if (
-                destination_key in existing_keys
-                and destination_key not in source_keys
-            ):
-                block(
-                    item.id,
-                    item.old_path,
-                    f"Destination already exists: {item.new_path}",
-                )
-                changed = True
-
-    safe_renames = [item for item in renames if item.id not in blocked]
-    safe_tags = [item for item in tags if item.id not in blocked]
-    blocked_results = [
-        blocked[item.id]
-        for item in (*renames, *tags)
-        if item.id in blocked
-    ]
-    return safe_renames, safe_tags, blocked_results
-
-
 def _journal_path(batch_id: str) -> Path:
     return ensure_app_dirs()["journals"] / f"{batch_id}.json"
 
 
-class BatchJournal:
-    def __init__(self, plan: ReviewPlan, selected_ids: Iterable[str]):
-        self.path = _journal_path(plan.batch_id)
-        self.data = {
-            "batch_id": plan.batch_id,
-            "plan_digest": plan.digest,
-            "schema_version": plan.schema_version,
-            "app_version": plan.app_version,
-            "root": plan.root,
-            "created_at": plan.created_at,
-            "status": "preflighting",
-            "selected_ids": sorted(selected_ids),
-            "plan": plan.to_dict(),
-            "events": [],
-            "actions": [],
-        }
-        self.flush()
-
-    def flush(self) -> None:
-        atomic_write_json(self.path, self.data)
-
-    def event(self, kind: str, **payload) -> None:
-        self.data["events"].append(
-            {
-                "kind": kind,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-                **payload,
-            }
-        )
-        self.flush()
-
-    def intent(self, kind: str, **payload) -> int:
-        action = {
-            "kind": kind,
-            "status": "intent",
-            "intent_timestamp": datetime.now(timezone.utc).isoformat(),
-            **payload,
-        }
-        self.data["actions"].append(action)
-        self.flush()
-        return len(self.data["actions"]) - 1
-
-    def complete(self, index: int, **payload) -> None:
-        self.data["actions"][index].update(
-            {
-                "status": "completed",
-                "completed_timestamp": datetime.now(timezone.utc).isoformat(),
-                **payload,
-            }
-        )
-        self.flush()
-
-    def fail(self, index: int, **payload) -> None:
-        self.data["actions"][index].update(
-            {
-                "status": "failed",
-                "failed_timestamp": datetime.now(timezone.utc).isoformat(),
-                **payload,
-            }
-        )
-        self.flush()
-
-    def finish(self, status: str) -> None:
-        self.data["status"] = status
-        self.data["finished_at"] = datetime.now(timezone.utc).isoformat()
-        self.flush()
-
-
-def _backup_path(batch_id: str, source: str) -> Path:
+def _metadata_backup_path(batch_id: str, source: str) -> Path:
     backup_dir = ensure_app_dirs()["backups"] / batch_id
     backup_dir.mkdir(parents=True, exist_ok=True)
     path_digest = hashlib.sha256(canonical_path(source).encode("utf-8")).hexdigest()[:16]
-    safe_name = f"{path_digest}-{Path(source).name}"
+    safe_name = f"{path_digest}-{Path(source).name}.metadata.json"
     return backup_dir / safe_name
+
+
+def _tag_temporary_path(path: str, batch_id: str, proposal_id: str) -> Path:
+    source = Path(path)
+    safe_id = re.sub(r"[^A-Za-z0-9_-]", "", proposal_id)[:24]
+    return source.with_name(
+        f".songorganizer-{batch_id[:12]}-{safe_id}{source.suffix}"
+    )
+
+
+def _backup_front_artwork(item: TagProposal, backup: Path) -> dict | None:
+    if item.artwork_before is None:
+        return None
+    image = read_front_artwork(item.path)
+    if image is None:
+        raise ApplyBlocked("Original artwork disappeared before backup.")
+    data, mime_type = image
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != item.artwork_before.sha256:
+        raise ApplyBlocked("Original artwork changed before backup.")
+    suffix = ".png" if mime_type == "image/png" else ".jpg"
+    destination = backup.with_name(f"{backup.stem}.artwork{suffix}")
+    temporary = destination.with_suffix(f"{destination.suffix}.tmp")
+    temporary.write_bytes(data)
+    os.replace(temporary, destination)
+    return {
+        "path": str(destination),
+        "sha256": digest,
+        "size": len(data),
+        "mime_type": mime_type,
+        "release_id": "",
+        "source_url": "",
+    }
 
 
 def _apply_tag(
     item: TagProposal,
-    journal: BatchJournal,
+    journal: TransactionJournal,
 ) -> ApplyResult:
-    backup = _backup_path(journal.data["batch_id"], item.path)
+    backup = _metadata_backup_path(journal.data["batch_id"], item.path)
+    temporary = _tag_temporary_path(
+        item.path,
+        journal.data["batch_id"],
+        item.id,
+    )
     action_index: int | None = None
     try:
         if not item.snapshot.matches(item.path):
             raise ApplyBlocked(f"Tag source changed since preflight: {item.path}")
-        _retry_filesystem(lambda: shutil.copy2(item.path, backup))
+        if temporary.exists():
+            raise ApplyBlocked(f"Tag temporary path already exists: {temporary}")
+        artwork_backup = _backup_front_artwork(item, backup)
+        atomic_write_json(
+            backup,
+            {
+                "before": item.before.to_dict(),
+                "artwork_before": artwork_backup,
+                "source": item.path,
+            },
+        )
         post_hash_before = sha256_file(item.path)
+        _retry_filesystem(lambda: shutil.copy2(item.path, temporary))
         action_index = journal.intent(
             "tag",
             proposal_id=item.id,
             path=item.path,
             backup_path=str(backup),
-            before=item.before,
-            after=item.after,
+            temporary_path=str(temporary),
+            before=item.before.to_dict(),
+            after=item.after.to_dict(),
+            artwork_before=artwork_to_dict(item.artwork_before),
+            artwork_after=artwork_to_dict(item.artwork_after),
         )
-        result = _retry_filesystem(
-            lambda: write_tags_to_file(item.path, item.after)
-        )
+        if item.artwork_after:
+            result = _retry_filesystem(
+                lambda: write_tags_to_file(
+                    str(temporary),
+                    item.after,
+                    item.artwork_after,
+                )
+            )
+        else:
+            result = _retry_filesystem(
+                lambda: write_tags_to_file(str(temporary), item.after)
+            )
         if result.get("status") not in {"updated", "already_ok"}:
             raise ApplyBlocked(result.get("reason", "Tag writer skipped file"))
-        media = read_media(item.path)
-        for key, expected in item.after.items():
-            if media.tags.get(key, "") != expected:
-                raise ApplyBlocked(
-                    f"Tag verification failed for {key}: expected {expected!r}, "
-                    f"got {media.tags.get(key, '')!r}"
-                )
+        media = read_media(str(temporary))
+        if not metadata_matches(item.after, media.tags):
+            raise ApplyBlocked("Canonical tag verification failed.")
+        if (
+            item.artwork_after
+            and (
+                media.artwork is None
+                or media.artwork.get("sha256") != item.artwork_after.get("sha256")
+            )
+        ):
+            raise ApplyBlocked("Artwork verification failed.")
+        _retry_filesystem(lambda: os.replace(temporary, item.path))
         post_hash = sha256_file(item.path)
         journal.complete(
             action_index,
@@ -371,12 +227,13 @@ def _apply_tag(
         if action_index is not None:
             journal.fail(action_index, error=str(exc))
         try:
-            shutil.copy2(backup, item.path)
+            if temporary.exists():
+                temporary.unlink()
             if action_index is not None:
                 journal.data["actions"][action_index]["rollback_status"] = "succeeded"
                 journal.flush()
-        except OSError as restore_exc:
-            exc = RuntimeError(f"{exc}; automatic restore failed: {restore_exc}")
+        except OSError as cleanup_exc:
+            exc = RuntimeError(f"{exc}; temporary cleanup failed: {cleanup_exc}")
             if action_index is not None:
                 journal.data["actions"][action_index]["rollback_status"] = "failed"
                 journal.flush()
@@ -393,10 +250,10 @@ def _temporary_path(path: str, batch_id: str, index: int | str) -> str:
 
 def _apply_renames(
     renames: list[RenameProposal],
-    journal: BatchJournal,
+    journal: TransactionJournal,
     cancel_event=None,
     progress: ProgressCallback | None = None,
-    tag_paths: set[str] | None = None,
+    completed_tag_paths: set[str] | None = None,
 ) -> list[ApplyResult]:
     if not renames:
         return []
@@ -414,7 +271,10 @@ def _apply_renames(
     for index, item in enumerate(renames):
         if cancel_event is not None and cancel_event.is_set():
             break
-        if not tag_paths or path_key(item.old_path) not in tag_paths:
+        if (
+            not completed_tag_paths
+            or path_key(item.old_path) not in completed_tag_paths
+        ):
             if not item.snapshot.matches(item.old_path):
                 return [
                     ApplyResult(
@@ -476,8 +336,6 @@ def _apply_renames(
         results.append(result)
         if progress:
             progress("rename", index + 1, len(renames), result)
-        if result.status == "failed":
-            break
     return results
 
 
@@ -503,16 +361,27 @@ def apply_review_plan(
     selected_ids = list(selected_ids)
     if not selected_ids:
         return []
+    if not plan.validate_digest():
+        message = "Review plan digest does not match its contents."
+        return [
+            _blocked_result(proposal_id, "", message)
+            for proposal_id in selected_ids
+        ]
     try:
-        renames, tags = _selected_proposals(plan, selected_ids)
+        renames, tags = transaction_selected_proposals(plan, selected_ids)
     except ApplyBlocked as exc:
         return [
             _blocked_result(proposal_id, "", str(exc))
             for proposal_id in selected_ids
         ]
-    journal = BatchJournal(plan, selected_ids)
+    selected_tags = {item.id: item for item in tags}
+    journal = TransactionJournal(
+        plan,
+        selected_ids,
+        _journal_path(plan.batch_id),
+    )
     try:
-        renames, tags, blocked_results = _preflight(renames, tags)
+        renames, tags, blocked_results = transaction_preflight(renames, tags)
     except ApplyBlocked as exc:
         journal.event("preflight-failed", message=str(exc))
         journal.finish("blocked")
@@ -528,6 +397,32 @@ def apply_review_plan(
             path=result.path,
             message=result.message,
         )
+    blocked_tag_groups = {
+        selected_tags[result.proposal_id].decision_group_id
+        for result in blocked_results
+        if result.proposal_id in selected_tags
+    }
+    dependent_renames = [
+        item
+        for item in renames
+        if item.decision_group_id in blocked_tag_groups
+    ]
+    if dependent_renames:
+        dependent_ids = {item.id for item in dependent_renames}
+        renames = [item for item in renames if item.id not in dependent_ids]
+        for item in dependent_renames:
+            result = _blocked_result(
+                item.id,
+                item.old_path,
+                "Coordinated tag action was blocked during preflight.",
+            )
+            blocked_results.append(result)
+            journal.event(
+                "proposal-blocked",
+                proposal_id=item.id,
+                path=item.old_path,
+                message=result.message,
+            )
     journal.event(
         "preflight-passed",
         blocked_count=len(blocked_results),
@@ -540,30 +435,109 @@ def apply_review_plan(
     journal.data["status"] = "applying"
     journal.flush()
     results: list[ApplyResult] = list(blocked_results)
-    for index, item in enumerate(tags):
+    tag_results_by_group: dict[str, ApplyResult] = {}
+    transactions = group_transactions(renames, tags)
+    transaction_by_group = {
+        transaction.decision_group_id: transaction
+        for transaction in transactions
+    }
+    tag_transactions = [
+        transaction for transaction in transactions if transaction.tag is not None
+    ]
+    for index, transaction in enumerate(tag_transactions):
+        item = transaction.tag
+        if item is None:
+            continue
         if cancel_event is not None and cancel_event.is_set():
-            results.append(
-                ApplyResult(
-                    proposal_id=item.id,
-                    status="cancelled",
-                    path=item.path,
-                    message="Cancellation requested before tag write.",
-                )
+            result = ApplyResult(
+                proposal_id=item.id,
+                status="cancelled",
+                path=item.path,
+                message="Cancellation requested before tag write.",
+            )
+            results.append(result)
+            tag_results_by_group[item.decision_group_id] = result
+            transaction_by_group[item.decision_group_id] = (
+                transaction.transition(TransactionState.CANCELLED)
             )
             break
+        transaction = transaction.transition(TransactionState.TAGGING)
+        journal.event(
+            "transaction-state",
+            decision_group_id=item.decision_group_id,
+            state=transaction.state.value,
+        )
         result = _apply_tag(item, journal)
         results.append(result)
+        tag_results_by_group[item.decision_group_id] = result
+        transaction = transaction.transition(
+            TransactionState.TAGGED
+            if result.status == "succeeded"
+            else TransactionState.FAILED
+        )
+        transaction_by_group[item.decision_group_id] = transaction
+        journal.event(
+            "transaction-state",
+            decision_group_id=item.decision_group_id,
+            state=transaction.state.value,
+        )
         if progress:
-            progress("tag", index + 1, len(tags), result)
+            progress("tag", index + 1, len(tag_transactions), result)
 
+    failed_tag_groups = {
+        group_id
+        for group_id, result in tag_results_by_group.items()
+        if result.status != "succeeded"
+    }
+    dependent_renames = [
+        item
+        for item in renames
+        if item.decision_group_id in failed_tag_groups
+    ]
+    if dependent_renames:
+        dependent_ids = {item.id for item in dependent_renames}
+        renames = [item for item in renames if item.id not in dependent_ids]
+        for item in dependent_renames:
+            result = _blocked_result(
+                item.id,
+                item.old_path,
+                "Coordinated tag action did not succeed; rename was not attempted.",
+            )
+            results.append(result)
+            journal.event(
+                "proposal-blocked",
+                proposal_id=item.id,
+                path=item.old_path,
+                message=result.message,
+            )
     rename_results = _apply_renames(
         renames,
         journal,
         cancel_event=cancel_event,
         progress=progress,
-        tag_paths={path_key(item.path) for item in tags},
+        completed_tag_paths={
+            path_key(selected_tags[result.proposal_id].path)
+            for result in tag_results_by_group.values()
+            if result.status == "succeeded"
+        },
     )
     results.extend(rename_results)
+    rename_by_id = {item.id: item for item in renames}
+    for result in rename_results:
+        item = rename_by_id[result.proposal_id]
+        transaction = transaction_by_group[item.decision_group_id]
+        transaction = transaction.transition(TransactionState.RENAMING)
+        transaction = transaction.transition(
+            TransactionState.COMPLETED
+            if result.status == "succeeded"
+            else TransactionState.FAILED
+        )
+        transaction_by_group[item.decision_group_id] = transaction
+        journal.event(
+            "transaction-state",
+            decision_group_id=item.decision_group_id,
+            state=transaction.state.value,
+        )
     status = (
         "cancelled"
         if cancel_event is not None and cancel_event.is_set()
@@ -593,8 +567,63 @@ def undo_batch(batch_id: str) -> list[ApplyResult]:
                 "undone_timestamp": datetime.now(timezone.utc).isoformat(),
             }
         )
+        for stale_key in ("undo_error", "undo_error_type", "undo_error_at"):
+            action.pop(stale_key, None)
+
+    def record_undo_error(action: dict, exc: BaseException) -> None:
+        # Persisted so a later "Review the batch journal" is actually
+        # actionable instead of pointing at a file with no failure reason.
+        action["undo_error"] = str(exc)
+        action["undo_error_type"] = type(exc).__name__
+        action["undo_error_at"] = datetime.now(timezone.utc).isoformat()
 
     for action in reversed(data.get("actions", [])):
+        if (
+            action.get("status") == "intent"
+            and action.get("kind") == "tag"
+        ):
+            temporary = Path(action.get("temporary_path", ""))
+            try:
+                if temporary.is_file():
+                    temporary.unlink()
+                    message = "Interrupted temporary tag write discarded."
+                else:
+                    backup_path = Path(action.get("backup_path", ""))
+                    if not backup_path.is_file() or not os.path.exists(action["path"]):
+                        raise FileNotFoundError(action.get("backup_path", ""))
+                    restore_metadata_snapshot(
+                        action["path"],
+                        str(backup_path),
+                        str(
+                            _tag_temporary_path(
+                                action["path"],
+                                batch_id,
+                                f"restore-{action.get('proposal_id', '')}",
+                            )
+                        ),
+                        writer=write_tags_to_file,
+                        media_reader=read_media,
+                    )
+                    message = "Interrupted tag write restored from metadata snapshot."
+                results.append(
+                    ApplyResult(
+                        proposal_id=action.get("proposal_id", ""),
+                        status="succeeded",
+                        path=action.get("path", ""),
+                        message=message,
+                    )
+                )
+                mark_undone(action)
+            except Exception as exc:  # pylint: disable=broad-exception-caught
+                record_undo_error(action, exc)
+                results.append(
+                    _result_error(
+                        action.get("proposal_id", ""),
+                        action.get("path", ""),
+                        exc,
+                    )
+                )
+            continue
         if action.get("status") != "completed":
             continue
         try:
@@ -606,7 +635,23 @@ def undo_batch(batch_id: str) -> list[ApplyResult]:
                     raise FileNotFoundError(path)
                 if action.get("post_hash") and sha256_file(path) != action["post_hash"]:
                     raise ApplyBlocked(f"File changed after apply: {path}")
-                _copy_with_retry(action["backup_path"], path)
+                backup_path = Path(action["backup_path"])
+                if backup_path.name.endswith(".metadata.json"):
+                    restore_metadata_snapshot(
+                        path,
+                        str(backup_path),
+                        str(
+                            _tag_temporary_path(
+                                path,
+                                batch_id,
+                                f"restore-{action['proposal_id']}",
+                            )
+                        ),
+                        writer=write_tags_to_file,
+                        media_reader=read_media,
+                    )
+                else:
+                    _copy_with_retry(action["backup_path"], path)
                 results.append(
                     ApplyResult(
                         proposal_id=action["proposal_id"],
@@ -659,6 +704,7 @@ def undo_batch(batch_id: str) -> list[ApplyResult]:
                 elif os.path.exists(old) and not os.path.exists(temporary):
                     mark_undone(action)
         except Exception as exc:  # pylint: disable=broad-exception-caught
+            record_undo_error(action, exc)
             results.append(
                 _result_error(action.get("proposal_id", ""), action.get("path", ""), exc)
             )

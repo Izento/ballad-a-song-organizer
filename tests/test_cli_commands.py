@@ -3,7 +3,7 @@
 from argparse import Namespace
 from types import SimpleNamespace
 
-from cli.commands import rename, shared
+from cli.commands import enrich, rename, shared
 from cli.config import FolderConfig
 
 
@@ -35,6 +35,8 @@ def test_rename_dry_run_uses_review_api_without_applying(tmp_path, monkeypatch):
         id="rename-1",
         old_path=str(source),
         new_path=str(tmp_path / "Artist - Title.mp3"),
+        apply_eligible=True,
+        requires_review=False,
     )
     monkeypatch.setattr(
         rename,
@@ -66,3 +68,30 @@ def test_rename_dry_run_uses_review_api_without_applying(tmp_path, monkeypatch):
 
     assert rename.run(args, output) == 0
     assert any("1 of 1 files would be renamed" in message for message in output.messages)
+
+
+def test_enrich_passes_explicit_cover_art_preference(tmp_path, monkeypatch):
+    observed = {}
+    monkeypatch.setattr(
+        enrich,
+        "command_folders",
+        lambda *_args, **_kwargs: [FolderConfig(str(tmp_path), recursive=True)],
+    )
+    monkeypatch.setattr(enrich, "online_key", lambda *_args: None)
+    monkeypatch.setattr(
+        enrich,
+        "analyze_folder",
+        lambda *_args, **kwargs: observed.update(kwargs)
+        or SimpleNamespace(rename_proposals=(), tag_proposals=(), issues=()),
+    )
+    args = Namespace(
+        folder=str(tmp_path),
+        config=None,
+        fingerprint=False,
+        apply=False,
+        cover_art=False,
+    )
+
+    assert enrich.run(args, _Output()) == 0
+    assert observed["enrich_metadata"] is True
+    assert observed["include_artwork"] is False

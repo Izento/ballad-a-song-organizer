@@ -1,9 +1,8 @@
-# Song Organizer
+# Ballad: A Song Organizer
 
-Song Organizer is a review-first Windows music-library organizer. Its desktop
-interface is branded **Ballad**. It analyzes a folder without changing files,
-presents filename and tag repairs for review, and applies only the actions the
-user selects.
+Ballad is a review-first Windows music-library organizer. It analyzes a folder
+without changing files, presents filename and tag repairs for review, and
+applies only the actions the user selects.
 
 ## What it does
 
@@ -11,6 +10,8 @@ user selects.
 - Audits and repairs tags to match approved filenames.
 - Identifies tracks with missing or conflicting metadata through optional
   AcoustID lookup.
+- Enriches verified recordings with MusicBrainz artist credits, release,
+  date, genre, credits, identifiers, and missing front artwork.
 - Finds duplicate candidates without deleting files.
 - Journals applied changes and supports guarded undo.
 
@@ -30,10 +31,36 @@ explicit subcommands:
 uv run ballad rename --folder "D:\Music\Library"
 uv run ballad audit --folder "D:\Music\Library"
 uv run ballad tags --folder "D:\Music\Library"
+uv run ballad enrich --folder "D:\Music\Library"
+uv run ballad enrich --folder "D:\Music\Library" --apply
 uv run ballad dedup --folder "D:\Music\Library"
 uv run ballad auto-detect --folder "D:\Music\Library"
 uv run ballad undo
 ```
+
+## Enrich metadata
+
+The GUI's **Organize library** action asks for confirmation, identifies songs,
+writes all verified metadata, embeds missing front cover art, and renames the
+same verified files. Ambiguous recordings and unsupported files remain
+unchanged and appear in **Skipped / errors**; duplicate findings remain
+read-only. The tag row's context menu can show the MusicBrainz and
+identification evidence used for a proposal.
+
+From the command line, `ballad enrich` previews proposals. Add `--apply` to
+write verified changes; add `--no-cover-art` to skip cover-art downloads.
+
+Ballad first uses an embedded MusicBrainz recording ID when present. Otherwise,
+with optional AcoustID enabled, it fingerprints audio locally and sends only
+the fingerprint plus duration to AcoustID. AcoustID supplies source-recording
+evidence; [MusicBrainz](https://musicbrainz.org/) supplies canonical recording
+and release metadata. The [Cover Art Archive](https://coverartarchive.org/)
+is queried only for the selected MusicBrainz release.
+
+Local version identity is preserved: instrumentals, a cappellas, remixes, VIP
+versions, edits, and extensions are not overwritten by a source-song match.
+For local derivatives, Ballad writes only safe song-level credits and does not
+assign the source release IDs or artwork.
 
 ## Optional online identification
 
@@ -67,13 +94,13 @@ off the checkbox for a faster metadata/hash-only duplicate scan.
    ACOUSTID_API_KEY=your_key_here
    ```
 
-4. Restart Ballad. The header will show `Online identification: enabled`.
+4. Restart Ballad. The header will show `Online identification: ready`.
 
 AcoustID lookup is optional; Ballad still analyzes and repairs
 filenames/tags without a key.
 
-The GUI uses available online identification for missing or conflicting
-metadata. Its fingerprint checkbox controls optional duplicate-check evidence.
+The GUI has a separate **Use AcoustID identification during enrichment**
+control. Its fingerprint checkbox controls optional duplicate-check evidence.
 
 ## Build
 
@@ -96,7 +123,15 @@ update them together only after reviewing a new official Chromaprint release.
 ## Safety
 
 - Analysis is read-only until selected changes are confirmed.
-- Applied filename and tag changes are journaled for recovery and undo.
+- Enrichment writes tag updates to a same-filesystem temporary copy, verifies
+  its tags and artwork, then atomically replaces the original.
+- Tag updates retain compact metadata/artwork snapshots for guarded undo rather
+  than full duplicate audio-file backups.
+- Every reviewed plan is digest-validated before mutation. Coordinated tag and
+  rename actions run as a per-song transaction, and a failed tag write blocks
+  that song's rename without stopping unrelated songs.
+- Applied filename and tag changes are journaled for recovery and verified,
+  atomic undo.
 - Duplicate findings are read-only; no normal operation permanently deletes
   files.
 - CLI rename and tag changes require `--apply`; `ballad undo` restores the
@@ -109,9 +144,21 @@ uv sync --extra test
 uv run pytest
 ```
 
+## Code organization
+
+- `src/ballad` is the public package and entry-point namespace.
+- `renamer/domain` contains immutable metadata, identity, artwork, and issue
+  contracts.
+- `renamer/naming`, `renamer/media`, and `renamer/online` own parsing,
+  container adapters, and provider policy.
+- `renamer/planners` performs read-only analysis; `renamer/transactions`
+  validates, applies, journals, and restores reviewed changes.
+- `cli` and `gui` are thin interfaces over those application services. GUI
+  workers and presentation models do not depend on Tk widgets.
+
 Application state, cache files, build outputs, virtual environments, API keys,
 and private release archives are excluded from Git.
 
 ## License
 
-Song Organizer is licensed under the MIT License. See `LICENSE`.
+Ballad is licensed under the MIT License. See `LICENSE`.

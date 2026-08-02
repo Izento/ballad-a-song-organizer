@@ -3,41 +3,89 @@
 from __future__ import annotations
 
 import importlib.util
-import time
+import re
+import threading
+from dataclasses import dataclass, field, replace
+from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
+
+from .cache import enrichment_cache
+from .domain.identity import Confidence
+from .domain.metadata import CanonicalMetadata
+from .online import RateLimiter
+from .regular_parser import normalize_text, split_features
 
 if TYPE_CHECKING:
     from .extractor import TrackInfo
 
 _RELEASE_CACHE: dict[str, list] = {}
+_CACHE_REQUEST_LOCK = threading.Lock()
+_IN_FLIGHT_REQUESTS: dict[tuple[str, str], threading.Lock] = {}
 
 
-class _RateLimiter:
-    def __init__(self, interval: float) -> None:
-        self.interval = interval
-        self.last_request = 0.0
-
-    def wait(self) -> None:
-        wait = self.interval - (time.monotonic() - self.last_request)
-        if wait > 0:
-            time.sleep(wait)
-        self.last_request = time.monotonic()
+_REQUEST_LIMITER = RateLimiter(1.1)
 
 
-_REQUEST_LIMITER = _RateLimiter(1.1)
+@dataclass(frozen=True)
+class ReleaseCandidate:
+    """A release that contains a recording, scored against local evidence."""
+
+    release_id: str
+    title: str
+    date: str = ""
+    status: str = ""
+    country: str = ""
+    release_group_type: str = ""
+    score: int = 0
+    reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class EnrichmentResult:
+    """Verified recording/release fields safe to merge into local metadata."""
+
+    recording_id: str
+    values: CanonicalMetadata = field(default_factory=CanonicalMetadata)
+    release_id: str = ""
+    release_group_id: str = ""
+    confidence: Confidence = Confidence.LOW
+    warnings: tuple[str, ...] = ()
+    provenance: tuple[str, ...] = ()
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "values", CanonicalMetadata.coerce(self.values))
+        object.__setattr__(self, "confidence", Confidence(self.confidence))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "provenance", tuple(self.provenance))
+
+    def to_dict(self) -> dict[str, object]:
+        return {
+            "recording_id": self.recording_id,
+            "values": self.values.to_dict(),
+            "release_id": self.release_id,
+            "release_group_id": self.release_group_id,
+            "confidence": self.confidence.value,
+            "warnings": list(self.warnings),
+            "provenance": list(self.provenance),
+        }
 
 
 def _available() -> bool:
     return importlib.util.find_spec("musicbrainzngs") is not None
 
 
+def is_available() -> bool:
+    """Return whether the optional MusicBrainz client can be imported."""
+    return _available()
+
+
 def _mb():
     import musicbrainzngs  # pylint: disable=import-error
 
     musicbrainzngs.set_useragent(
-        "SongOrganizer",
+        "Ballad",
         "1.0",
-        "https://github.com/Izento/song-organizer",
+        "https://github.com/Izento/ballad-a-song-organizer",
     )
     return musicbrainzngs
 
@@ -74,8 +122,21 @@ def lookup_track_by_album(album: str, track_num: int, artist_hint: str = '') -> 
                 _RELEASE_CACHE[cache_key] = []
                 return None
 
+            candidate, _warnings = select_release(
+                releases,
+                {
+                    "album": album,
+                    "album_artist": artist_hint,
+                },
+            )
+            if candidate is None:
+                _RELEASE_CACHE[cache_key] = []
+                return None
             _rate_limit()
-            release = mb.get_release_by_id(releases[0]['id'], includes=['recordings'])
+            release = mb.get_release_by_id(
+                candidate.release_id,
+                includes=['recordings'],
+            )
 
             tracks = []
             for medium in release['release'].get('medium-list', []):
@@ -140,6 +201,530 @@ def lookup_ocremix_remixers(game: str, song_title: str) -> list[str] | None:
     return None
 
 
+_FEATURE_JOIN_RE = re.compile(
+    r"\b(?:feat(?:uring)?|ft)\.?\b|\bwith\b",
+    re.IGNORECASE,
+)
+_CO_ARTIST_JOIN_RE = re.compile(
+    r"^\s*(?:&|and|x|vs\.?|versus)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _credit_name(credit: dict) -> str:
+    artist = credit.get("artist") or {}
+    return str(credit.get("name") or artist.get("name") or "").strip()
+
+
+def _feature_relation_names(relations: list | None) -> set[str]:
+    """Return artists explicitly marked as vocal/guest contributors."""
+    names: set[str] = set()
+    for relation in relations or []:
+        if not isinstance(relation, dict):
+            continue
+        relation_type = str(relation.get("type") or "").casefold()
+        attributes = {
+            str(value).casefold()
+            for value in relation.get("attribute-list", [])
+        }
+        is_feature = relation_type in {"vocal", "featured artist"} or bool(
+            attributes
+            & {
+                "additional",
+                "background vocals",
+                "guest",
+                "lead vocals",
+                "vocals",
+            }
+        )
+        if not is_feature:
+            continue
+        artist = relation.get("artist") or {}
+        name = str(artist.get("name") or "").strip()
+        if name:
+            names.add(normalize_text(name))
+    return names
+
+
+def _artist_credit_identity(
+    artist_credits: list | None,
+    relations: list | None = None,
+) -> tuple[str, tuple[str, ...]]:
+    """Split a credit into a primary artist and conservative features.
+
+    MusicBrainz frequently returns several credited artists with blank
+    ``joinphrase`` values. Blank does not mean ``&``. If recording
+    relations identify a vocalist, use that role and discard unrelated
+    extra credits (often remix/production credits). Otherwise, retain
+    additional blank-join credits as features rather than asserting a
+    co-billing relationship.
+    """
+    credits = [
+        (credit, _credit_name(credit))
+        for credit in artist_credits or ()
+        if isinstance(credit, dict) and _credit_name(credit)
+    ]
+    if not credits:
+        return "", ()
+
+    primary = credits[0][1]
+    relation_features = _feature_relation_names(relations)
+    has_relation_features = bool(
+        relation_features
+        & {normalize_text(name) for _credit, name in credits[1:]}
+    )
+    features: list[str] = []
+
+    def add_feature(name: str) -> None:
+        if normalize_text(name) not in {
+            normalize_text(existing) for existing in features
+        }:
+            features.append(name)
+
+    for index, (credit, name) in enumerate(credits[1:], start=1):
+        previous_joinphrase = str(
+            credits[index - 1][0].get("joinphrase") or ""
+        )
+        normalized_name = normalize_text(name)
+        if normalized_name in relation_features or _FEATURE_JOIN_RE.search(
+            previous_joinphrase
+        ):
+            add_feature(name)
+            continue
+        if not previous_joinphrase.strip():
+            if not has_relation_features:
+                add_feature(name)
+            continue
+        if _CO_ARTIST_JOIN_RE.fullmatch(previous_joinphrase):
+            primary = f"{primary}{previous_joinphrase}{name}"
+            continue
+        # Preserve any explicit non-feature joinphrase rather than replacing
+        # it with a made-up relationship.
+        primary = f"{primary}{previous_joinphrase}{name}"
+
+    return primary.strip(), tuple(features)
+
+
+def _format_artist_identity(
+    primary: str,
+    features: tuple[str, ...],
+) -> str:
+    if not features:
+        return primary
+    return f"{primary} feat. {', '.join(features)}"
+
+
+def _artist_credit_name(
+    artist_credits: list | None,
+    relations: list | None = None,
+) -> str:
+    """Return a readable credit without inventing blank joinphrases."""
+    primary, features = _artist_credit_identity(artist_credits, relations)
+    return _format_artist_identity(primary, features)
+
+
+def _merge_feature_names(*groups: tuple[str, ...]) -> tuple[str, ...]:
+    def equivalent(left: str, right: str) -> bool:
+        left_normalized = normalize_text(left)
+        right_normalized = normalize_text(right)
+        left_squashed = re.sub(r"\W+", "", left_normalized)
+        right_squashed = re.sub(r"\W+", "", right_normalized)
+        if left_squashed == right_squashed:
+            return True
+        shorter = min(left_squashed, right_squashed, key=len)
+        if len(shorter) < 4:
+            return False
+        return SequenceMatcher(
+            None,
+            left_squashed,
+            right_squashed,
+        ).ratio() >= 0.86
+
+    merged: list[str] = []
+    for group in groups:
+        for feature in group:
+            normalized = normalize_text(feature)
+            if not normalized:
+                continue
+            if any(
+                equivalent(feature, existing)
+                or normalized in normalize_text(existing)
+                or normalize_text(existing) in normalized
+                for existing in merged
+            ):
+                continue
+            merged.append(feature)
+    return tuple(merged)
+
+
+def _title_with_features(
+    title: str,
+    features: tuple[str, ...],
+) -> str:
+    clean_title, existing_features = split_features(str(title or ""))
+    merged = _merge_feature_names(existing_features, features)
+    if not merged:
+        return clean_title
+    return f"{clean_title} (feat. {', '.join(merged)})"
+
+
+def _values(items: list | None, key: str = "name") -> list[str]:
+    result = []
+    for item in items or []:
+        if isinstance(item, str) and item:
+            result.append(item)
+        elif isinstance(item, dict) and item.get(key):
+            result.append(item[key])
+    return result
+
+
+def _release_type(release: dict) -> str:
+    group = release.get("release-group") or {}
+    return str(group.get("primary-type") or "").casefold()
+
+
+def _candidate_score(
+    release: dict,
+    local_evidence: dict[str, object],
+) -> ReleaseCandidate:
+    reasons: list[str] = []
+    score = 0
+    status = str(release.get("status") or "")
+    release_type = _release_type(release)
+    album = str(local_evidence.get("album") or "")
+    album_artist = str(local_evidence.get("album_artist") or "")
+    release_artist = _artist_credit_name(release.get("artist-credit"))
+
+    if status.casefold() == "official":
+        score += 20
+        reasons.append("official release")
+    elif status:
+        score -= 35
+    if release_type in {"album", "single", "ep"}:
+        score += 10
+    elif release_type in {"compilation", "broadcast", "other"}:
+        score -= 30
+    if album and normalize_text(album) == normalize_text(str(release.get("title", ""))):
+        score += 100
+        reasons.append("matching album tag")
+    if (
+        album_artist
+        and release_artist
+        and normalize_text(album_artist) == normalize_text(release_artist)
+    ):
+        score += 35
+        reasons.append("matching album artist")
+    if local_evidence.get("musicbrainz_albumid") == release.get("id"):
+        score += 1000
+        reasons.append("matching embedded release ID")
+
+    return ReleaseCandidate(
+        release_id=str(release.get("id") or ""),
+        title=str(release.get("title") or ""),
+        date=str(release.get("date") or ""),
+        status=status,
+        country=str(release.get("country") or ""),
+        release_group_type=release_type,
+        score=score,
+        reasons=tuple(reasons),
+    )
+
+
+def select_release(
+    releases: list[dict],
+    local_evidence: dict[str, object] | None = None,
+) -> tuple[ReleaseCandidate | None, tuple[str, ...]]:
+    """Choose a canonical release conservatively from recording appearances."""
+    candidates = [
+        _candidate_score(release, local_evidence or {})
+        for release in releases
+        if release.get("id")
+    ]
+    if not candidates:
+        return None, ("MusicBrainz returned no release candidates.",)
+    evidence = local_evidence or {}
+    corroborated = any(
+        evidence.get(key)
+        for key in (
+            "album",
+            "album_artist",
+            "musicbrainz_albumid",
+            "tracknumber",
+            "discnumber",
+        )
+    )
+    if not corroborated:
+        eligible = [
+            candidate
+            for candidate in candidates
+            if candidate.status.casefold() == "official"
+            and candidate.release_group_type not in {"compilation", "broadcast", "other"}
+        ]
+        if eligible:
+            return min(
+                eligible,
+                key=lambda candidate: (
+                    candidate.date or "9999-99-99",
+                    candidate.release_id,
+                ),
+            ), (
+                "No local release evidence; selected the earliest official non-compilation release.",
+            )
+        return None, (
+            "No suitable official canonical release; release-specific metadata was skipped.",
+        )
+
+    def ordering(candidate: ReleaseCandidate) -> tuple[int, int, str, str]:
+        official = int(candidate.status.casefold() == "official")
+        standard_type = int(candidate.release_group_type in {"album", "single", "ep"})
+        return (
+            candidate.score,
+            official + standard_type,
+            "".join("9" if character.isdigit() else character for character in candidate.date)
+            or "9999-99-99",
+            candidate.release_id,
+        )
+
+    ranked = sorted(candidates, key=ordering, reverse=True)
+    best = ranked[0]
+    warnings: list[str] = []
+    tied = [candidate for candidate in ranked if candidate.score == best.score]
+    if len(tied) > 1 and best.score > 0:
+        warnings.append("Multiple releases match local evidence; selected the earliest.")
+        best = min(
+            tied,
+            key=lambda candidate: (candidate.date or "9999-99-99", candidate.release_id),
+        )
+    elif best.score <= 0:
+        eligible = [
+            candidate
+            for candidate in candidates
+            if candidate.status.casefold() == "official"
+            and candidate.release_group_type not in {"compilation", "broadcast", "other"}
+        ]
+        if eligible:
+            best = min(
+                eligible,
+                key=lambda candidate: (
+                    candidate.date or "9999-99-99",
+                    candidate.release_id,
+                ),
+            )
+            warnings.append(
+                "No local release evidence; selected the earliest official non-compilation release."
+            )
+        else:
+            warnings.append(
+                "No suitable official canonical release; release-specific metadata was skipped."
+            )
+            return None, tuple(warnings)
+    return best, tuple(warnings)
+
+
+def _cached_musicbrainz(
+    namespace: str,
+    cache_key: str,
+    request,
+) -> dict | None:
+    cache = enrichment_cache()
+    if (cached := cache.get(namespace, cache_key)) is not None:
+        return cached
+    key = namespace, cache_key
+    with _CACHE_REQUEST_LOCK:
+        request_lock = _IN_FLIGHT_REQUESTS.setdefault(key, threading.Lock())
+    try:
+        with request_lock:
+            if (cached := cache.get(namespace, cache_key)) is not None:
+                return cached
+            _rate_limit()
+            response = request()
+            cache.set(namespace, cache_key, response)
+            return response
+    finally:
+        with _CACHE_REQUEST_LOCK:
+            if _IN_FLIGHT_REQUESTS.get(key) is request_lock:
+                del _IN_FLIGHT_REQUESTS[key]
+
+
+def _release_track(release: dict, recording_id: str) -> tuple[dict, dict] | None:
+    for medium in release.get("medium-list", []):
+        for track in medium.get("track-list", []):
+            recording = track.get("recording") or {}
+            if recording.get("id") == recording_id:
+                return medium, track
+    return None
+
+
+def _relation_credits(recording: dict) -> dict[str, list[str]]:
+    role_map = {
+        "composer": "composer",
+        "writer": "writer",
+        "lyricist": "lyricist",
+        "producer": "producer",
+        "remixer": "remixer",
+        "mix": "mixer",
+        "performer": "performer",
+    }
+    role_credits: dict[str, list[str]] = {}
+    for relation in recording.get("artist-relation-list", []):
+        if not isinstance(relation, dict):
+            continue
+        role = role_map.get(str(relation.get("type") or "").casefold())
+        artist = relation.get("artist") or {}
+        name = artist.get("name") if isinstance(artist, dict) else ""
+        if role and name:
+            role_credits.setdefault(role, []).append(name)
+    return role_credits
+
+
+def _work_credits(recording: dict, mb) -> dict[str, list[str]]:
+    """Fetch composer/writer roles when a recording points at one work."""
+    work_id = next(
+        (
+            (relation.get("work") or {}).get("id")
+            for relation in recording.get("work-relation-list", [])
+            if isinstance(relation, dict) and isinstance(relation.get("work"), dict)
+        ),
+        "",
+    )
+    if not work_id:
+        return {}
+    payload = _cached_musicbrainz(
+        "musicbrainz-work",
+        work_id,
+        lambda: mb.get_work_by_id(work_id, includes=["artist-rels"]),
+    )
+    if not payload:
+        return {}
+    work = payload.get("work") or {}
+    return _relation_credits({"artist-relation-list": work.get("artist-relation-list", [])})
+
+
+def _metadata_from_release(
+    recording: dict,
+    release: dict,
+    recording_id: str,
+) -> dict[str, object]:
+    artist, features = _artist_credit_identity(
+        recording.get("artist-credit"),
+        recording.get("artist-relation-list"),
+    )
+    values: dict[str, object] = {
+        "artist": artist,
+        "title": _title_with_features(recording.get("title", ""), features),
+        "musicbrainz_recordingid": recording_id,
+        "isrc": _values(recording.get("isrc-list"), "id"),
+        "genre": _values(recording.get("genre-list")),
+        "tag": _values(recording.get("tag-list")),
+    }
+    values.update(_relation_credits(recording))
+    if not release:
+        return {key: value for key, value in values.items() if value}
+
+    release_group = release.get("release-group") or {}
+    values.update(
+        {
+            "album": release.get("title", ""),
+            "album_artist": _artist_credit_name(release.get("artist-credit")),
+            "date": release.get("date", ""),
+            "release_country": release.get("country", ""),
+            "release_status": release.get("status", ""),
+            "release_type": release_group.get("primary-type", ""),
+            "language": release.get("text-representation", {}).get("language", ""),
+            "script": release.get("text-representation", {}).get("script", ""),
+            "musicbrainz_albumid": release.get("id", ""),
+            "musicbrainz_releasegroupid": release_group.get("id", ""),
+            "barcode": release.get("barcode", ""),
+        }
+    )
+    label_info = release.get("label-info-list") or []
+    if label_info:
+        first = label_info[0]
+        label = first.get("label") or {}
+        values["label"] = label.get("name", "") if isinstance(label, dict) else ""
+        values["catalog_number"] = first.get("catalog-number", "")
+    matched = _release_track(release, recording_id)
+    if matched is not None:
+        medium, track = matched
+        values.update(
+            {
+                "tracknumber": track.get("number") or track.get("position", ""),
+                "tracktotal": medium.get("track-count", ""),
+                "discnumber": medium.get("position", ""),
+                "disctotal": release.get("medium-count", ""),
+            }
+        )
+    return {key: value for key, value in values.items() if value not in ("", [], None)}
+
+
+def enrich_recording(
+    recording_id: str,
+    *,
+    local_evidence: dict[str, object] | None = None,
+) -> EnrichmentResult | None:
+    """Fetch a recording, select a corroborated release, and return rich fields."""
+    if not recording_id or not _available():
+        return None
+    mb = _mb()
+    payload = _cached_musicbrainz(
+        "musicbrainz-recording",
+        recording_id,
+        lambda: mb.get_recording_by_id(
+            recording_id,
+            includes=[
+                "artists",
+                "releases",
+                "isrcs",
+                "tags",
+                "artist-rels",
+                "work-rels",
+            ],
+        ),
+    )
+    if not payload or not payload.get("recording"):
+        return None
+    recording = payload["recording"]
+    release, warnings = select_release(
+        recording.get("release-list") or [],
+        local_evidence,
+    )
+    detailed_release: dict = {}
+    if release is not None:
+        release_payload = _cached_musicbrainz(
+            "musicbrainz-release",
+            release.release_id,
+            lambda: mb.get_release_by_id(
+                release.release_id,
+                includes=[
+                    "artists",
+                    "recordings",
+                    "labels",
+                    "release-groups",
+                ],
+            ),
+        )
+        if release_payload:
+            detailed_release = release_payload.get("release") or {}
+    values = _metadata_from_release(recording, detailed_release, recording_id)
+    for role, names in _work_credits(recording, mb).items():
+        values.setdefault(role, names)
+    confidence = "high" if release and not warnings else "medium"
+    return EnrichmentResult(
+        recording_id=recording_id,
+        values=values,
+        release_id=release.release_id if release else "",
+        release_group_id=str(
+            (detailed_release.get("release-group") or {}).get("id") or ""
+        ),
+        confidence=confidence,
+        warnings=warnings,
+        provenance=(
+            "MusicBrainz recording",
+            *("MusicBrainz release" for _ in [release] if release is not None),
+        ),
+    )
+
+
 def enrich_track(track: TrackInfo) -> TrackInfo:
     """Fill a track's missing identity fields from MusicBrainz when possible."""
     if track.strategy == "musicbrainz":
@@ -149,17 +734,26 @@ def enrich_track(track: TrackInfo) -> TrackInfo:
             artist_hint=track.artist,
         )
         if result:
-            track.artist = result["artist"]
-            track.title = result["title"]
-            track.needs_lookup = False
+            return replace(
+                track,
+                artist=result["artist"],
+                title=result["title"],
+                needs_lookup=False,
+            )
         else:
-            track.skip_reason = (
-                f'MusicBrainz: no match for "{track.mb_album}" '
-                f"track {track.mb_track_num}"
+            return replace(
+                track,
+                skip_reason=(
+                    f'MusicBrainz: no match for "{track.mb_album}" '
+                    f"track {track.mb_track_num}"
+                ),
             )
     elif track.strategy in {"ocremix_old_tags", "ocremix_filename"} and not track.remixers:
         remixers = lookup_ocremix_remixers(track.game, track.title)
         if remixers:
-            track.remixers = remixers
-            track.needs_lookup = False
+            return replace(
+                track,
+                remixers=tuple(remixers),
+                needs_lookup=False,
+            )
     return track

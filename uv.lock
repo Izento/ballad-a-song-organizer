@@ -85,6 +85,40 @@ wheels = [
 ]
 
 [[package]]
+name = "ballad-a-song-organizer"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "musicbrainzngs" },
+    { name = "mutagen" },
+    { name = "pyacoustid" },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rich" },
+]
+
+[package.optional-dependencies]
+build = [
+    { name = "pyinstaller" },
+]
+test = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "musicbrainzngs", specifier = ">=0.7.1" },
+    { name = "mutagen", specifier = ">=1.47.0" },
+    { name = "pyacoustid", specifier = ">=1.3.0" },
+    { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0.0" },
+    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
+    { name = "pyyaml", specifier = ">=6.0.1" },
+    { name = "rich", specifier = ">=13.7.0" },
+]
+provides-extras = ["test", "build"]
+
+[[package]]
 name = "certifi"
 version = "2026.6.17"
 source = { registry = "https://pypi.org/simple" }
@@ -459,40 +493,6 @@ sdist = { url = "https://files.pythonhosted.org/packages/34/26/f5d29e25ffdb535af
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5d/40/e1e72872c6354b306daef1703549e8e83b4d43cfea356311bf722a043752/setuptools-83.0.0-py3-none-any.whl", hash = "sha256:29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3", size = 1008090, upload-time = "2026-07-04T15:31:20.885Z" },
 ]
-
-[[package]]
-name = "song-organizer"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "musicbrainzngs" },
-    { name = "mutagen" },
-    { name = "pyacoustid" },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "rich" },
-]
-
-[package.optional-dependencies]
-build = [
-    { name = "pyinstaller" },
-]
-test = [
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "musicbrainzngs", specifier = ">=0.7.1" },
-    { name = "mutagen", specifier = ">=1.47.0" },
-    { name = "pyacoustid", specifier = ">=1.3.0" },
-    { name = "pyinstaller", marker = "extra == 'build'", specifier = ">=6.0.0" },
-    { name = "pytest", marker = "extra == 'test'", specifier = ">=8.0.0" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "pyyaml", specifier = ">=6.0.1" },
-    { name = "rich", specifier = ">=13.7.0" },
-]
-provides-extras = ["test", "build"]
 
 [[package]]
 name = "standard-aifc"

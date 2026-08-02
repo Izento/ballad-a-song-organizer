@@ -11,6 +11,7 @@ def analyze_duplicates(
     progress=None,
     cancel_event=None,
     fingerprint: bool = False,
+    identity_overrides: dict[str, tuple[str, str]] | None = None,
 ):
     """Analyze all supported audio files with one evidence policy."""
     return analyze_regular_duplicates(
@@ -19,6 +20,7 @@ def analyze_duplicates(
         progress=progress,
         cancel_event=cancel_event,
         fingerprint=fingerprint,
+        identity_overrides=identity_overrides,
     )
 
 
@@ -29,6 +31,7 @@ def dedup_folder(
     progress=None,
     cancel_event=None,
     fingerprint: bool = False,
+    identity_overrides: dict[str, tuple[str, str]] | None = None,
 ):
     """Compatibility entry point; remains read-only by design."""
     return dedup_regular_folder(
@@ -38,6 +41,7 @@ def dedup_folder(
         progress=progress,
         cancel_event=cancel_event,
         fingerprint=fingerprint,
+        identity_overrides=identity_overrides,
     )
 
 

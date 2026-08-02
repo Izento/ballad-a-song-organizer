@@ -22,12 +22,13 @@ for notice in ("LICENSE", "LGPL-2.1.txt", "THIRD_PARTY_NOTICES.txt"):
         datas.append((str(candidate), "."))
 
 a = Analysis(
-    [str(ROOT / "gui" / "__main__.py")],
-    pathex=[str(ROOT)],
+    [str(ROOT / "src" / "ballad" / "desktop.py")],
+    pathex=[str(ROOT / "src"), str(ROOT)],
     binaries=binaries,
     datas=datas,
     hiddenimports=[
         "gui.app",
+        "ballad",
         "mutagen",
         "mutagen.id3",
         "mutagen.flac",

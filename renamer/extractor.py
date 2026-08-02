@@ -1,19 +1,26 @@
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import replace
 
+from .domain.identity import ExtractedTrack
 from .formatter import split_feat, strip_ocremix_suffix
 from .media import read_media
+from .naming.identity import reconcile_online_version
 from .regular_parser import (
-    has_instrumental_qualifier,
-    normalize_text,
     normalize_title_text,
-    parse_regular_filename,
     parse_regular_stem,
-    split_title_version_qualifiers,
 )
 
-AUDIO_EXTENSIONS = {'.mp3', '.flac', '.ogg', '.m4a', '.aac', '.wma', '.wav'}
+AUDIO_EXTENSIONS = {
+    '.mp3',
+    '.flac',
+    '.ogg',
+    '.m4a',
+    '.mp4',
+    '.aac',
+    '.wma',
+    '.wav',
+}
 
 # Detects "_OC_ReMix" suffix on the bare filename stem
 OCREMIX_STEM_RE = re.compile(r'_OC_ReMix$', re.IGNORECASE)
@@ -34,30 +41,7 @@ TRACK_NUM_ONLY_RE = re.compile(r'^\d{1,3}(\s+(track\s+\d+)?)?$', re.IGNORECASE)
 FOLDER_DATE_RE = re.compile(r'\s*\([0-9_/\s:APMapm]+\)\s*$')
 
 
-@dataclass
-class TrackInfo:
-    path: str
-    ext: str
-    # Regular music fields
-    artist: str = ''
-    title: str = ''
-    feat_artists: list = field(default_factory=list)
-    # OC ReMix fields
-    is_ocremix: bool = False
-    game: str = ''
-    remixers: list = field(default_factory=list)
-    # Metadata
-    strategy: str = ''
-    needs_lookup: bool = False
-    skip_reason: str = ''
-    # MusicBrainz lookup context
-    mb_album: str = ''
-    mb_track_num: int = 0
-    duration: float | None = None
-    bitrate: int | None = None
-    acoustid_score: float | None = None
-    acoustid_recording_id: str = ''
-    version_warning: str = ''
+TrackInfo = ExtractedTrack
 
 
 def scan_folder(folder_path: str, recursive: bool = True) -> list[str]:
@@ -313,75 +297,17 @@ def _from_acoustid(path: str, ext: str, api_key: str) -> 'TrackInfo | None':
     return _preserve_filename_version_qualifiers(path, track)
 
 
-def _qualifiers_agree(
-    filename_qualifiers: tuple[str, ...],
-    acoustid_qualifiers: tuple[str, ...],
-) -> bool:
-    if not filename_qualifiers or not acoustid_qualifiers:
-        return True
-    filename_values = {normalize_text(value) for value in filename_qualifiers}
-    acoustid_values = {normalize_text(value) for value in acoustid_qualifiers}
-    return all(
-        any(
-            filename_value in acoustid_value
-            or acoustid_value in filename_value
-            for acoustid_value in acoustid_values
-        )
-        for filename_value in filename_values
-    )
-
-
 def _preserve_filename_version_qualifiers(path: str, track: TrackInfo) -> TrackInfo:
-    """Retain local version labels that AcoustID metadata omits."""
-    filename = parse_regular_filename(os.path.basename(path))
-    if filename is None:
-        return track
-    if has_instrumental_qualifier(filename.title):
-        return _preserve_local_instrumental(track)
-
-    filename_base, filename_qualifiers = split_title_version_qualifiers(
-        filename.title
+    """Compatibility facade over the shared online-version policy."""
+    recording_id = track.acoustid_recording_id or track.exact_recording_id
+    resolution = reconcile_online_version(path, track.title, recording_id)
+    return replace(
+        track,
+        title=resolution.title,
+        exact_recording_id=resolution.exact_recording_id,
+        derived_from_recording_id=resolution.derived_from_recording_id,
+        version_warning=resolution.warning,
     )
-    acoustid_base, acoustid_qualifiers = split_title_version_qualifiers(track.title)
-    if (
-        not filename_qualifiers
-        or normalize_text(filename.artist) != normalize_text(track.artist)
-        or normalize_text(filename_base) != normalize_text(acoustid_base)
-    ):
-        return track
-    if not _qualifiers_agree(filename_qualifiers, acoustid_qualifiers):
-        track.version_warning = (
-            "Version qualifier conflicts with AcoustID metadata; "
-            "review the proposed filename."
-        )
-        return track
-
-    known = {normalize_text(value) for value in acoustid_qualifiers}
-    missing = [
-        value
-        for value in filename_qualifiers
-        if normalize_text(value) not in known
-    ]
-    if missing:
-        track.title = " ".join(
-            [acoustid_base, *(f"({value})" for value in missing)]
-        )
-    return track
-
-
-def _preserve_local_instrumental(track: TrackInfo) -> TrackInfo:
-    """Treat an explicit filename Instrumental label as authoritative."""
-    if has_instrumental_qualifier(track.title):
-        return track
-
-    _base_title, acoustid_qualifiers = split_title_version_qualifiers(track.title)
-    if acoustid_qualifiers:
-        track.version_warning = (
-            "Version qualifier conflicts with AcoustID metadata; "
-            "review the proposed filename."
-        )
-    track.title = f"{normalize_title_text(track.title)} (Instrumental)"
-    return track
 
 
 # ---------------------------------------------------------------------------

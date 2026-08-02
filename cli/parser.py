@@ -72,6 +72,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Apply reviewed-safe tag repairs instead of previewing them.",
     )
 
+    enrich = commands.add_parser(
+        "enrich",
+        help="Identify songs and enrich verified metadata and artwork.",
+    )
+    _add_folder_options(enrich)
+    enrich.add_argument(
+        "--fingerprint",
+        action="store_true",
+        help="Use AcoustID when embedded MusicBrainz IDs are unavailable.",
+    )
+    enrich.add_argument(
+        "--apply",
+        action="store_true",
+        help="Automatically apply verified renames, metadata, and artwork.",
+    )
+    enrich.add_argument(
+        "--no-cover-art",
+        action="store_false",
+        dest="cover_art",
+        help="Skip Cover Art Archive downloads and leave embedded artwork unchanged.",
+    )
+    enrich.set_defaults(cover_art=True)
+
     dedup = commands.add_parser("dedup", help="Audit duplicate candidates.")
     _add_folder_options(dedup)
 

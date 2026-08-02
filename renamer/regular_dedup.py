@@ -15,10 +15,10 @@ from typing import Callable
 
 from .extractor import AUDIO_EXTENSIONS
 from .fingerprint import fingerprint_file
-from .identity import TrackIdentity
+from .naming import TrackIdentity
 from .media import read_media
 from .regular_parser import RegularName, normalize_text, parse_regular_stem
-from .review_models import DuplicateFinding, proposal_id
+from .review_models import DuplicateFinding, path_key, proposal_id
 
 
 @dataclass
@@ -32,6 +32,12 @@ class RegularTrack:
     fingerprint: str | None = None
     fingerprint_error: str = ""
     error: str = ""
+    # Verified (artist, title) from a same-run metadata enrichment pass, when
+    # one already corrected this file's identity. Filenames are exactly what
+    # this tool exists to fix, so matching near-duplicates by a raw filename
+    # guess is unreliable for the messiest libraries; a confirmed enrichment
+    # result is worth trusting over that guess.
+    identity_override: tuple[str, str] | None = None
 
 
 def _sha256(path: str, chunk_size: int = 1024 * 1024) -> str:
@@ -60,13 +66,20 @@ def _parse_path(path: str) -> RegularName | None:
     return parse_regular_stem(Path(path).stem)
 
 
-def _collect_tracks(
+def collect_tracks(
     folder_path: str,
     recursive: bool,
     progress: Callable[[int, int, str], None] | None = None,
     cancel_event=None,
     fingerprint: bool = False,
 ) -> list[RegularTrack]:
+    """Scan and hash every audio file -- the disk/CPU-bound half of dedup.
+
+    Deliberately takes no identity overrides: this is the part worth
+    running on a background thread alongside network-bound metadata
+    enrichment, before enrichment's results (and thus any override) exist.
+    Callers apply overrides afterward via `_apply_identity_overrides`.
+    """
     paths = _audio_paths(folder_path, recursive)
     tracks: list[RegularTrack] = []
     total = len(paths)
@@ -102,7 +115,23 @@ def _collect_tracks(
     return tracks
 
 
+def _apply_identity_overrides(
+    tracks: list[RegularTrack],
+    identity_overrides: dict[str, tuple[str, str]] | None,
+) -> list[RegularTrack]:
+    if not identity_overrides:
+        return tracks
+    for track in tracks:
+        override = identity_overrides.get(path_key(track.path))
+        if override is not None:
+            track.identity_override = override
+    return tracks
+
+
 def _core_key(track: RegularTrack) -> tuple:
+    if track.identity_override is not None:
+        artist, title = track.identity_override
+        return (normalize_text(artist), normalize_text(title))
     if track.name is not None:
         return TrackIdentity.from_regular(track.name).core_key
     return (
@@ -192,20 +221,32 @@ def _finding(tracks: list[RegularTrack], classification: str) -> DuplicateFindin
 
 
 def analyze_regular_duplicates(
-    folder_path: str,
+    folder_path: str | None = None,
     recursive: bool = False,
     progress: Callable[[int, int, str], None] | None = None,
     cancel_event=None,
     fingerprint: bool = False,
+    identity_overrides: dict[str, tuple[str, str]] | None = None,
+    tracks: list[RegularTrack] | None = None,
 ) -> list[DuplicateFinding]:
-    """Return duplicate evidence without performing any filesystem mutation."""
-    tracks = _collect_tracks(
-        folder_path,
-        recursive,
-        progress=progress,
-        cancel_event=cancel_event,
-        fingerprint=fingerprint,
-    )
+    """Return duplicate evidence without performing any filesystem mutation.
+
+    Pass a pre-collected ``tracks`` list (from `collect_tracks`, typically
+    run on a background thread while metadata enrichment runs) to skip
+    re-scanning and re-hashing here; only the cheap in-memory grouping
+    below runs in that case.
+    """
+    if tracks is None:
+        if folder_path is None:
+            raise ValueError("folder_path is required when tracks is not provided")
+        tracks = collect_tracks(
+            folder_path,
+            recursive,
+            progress=progress,
+            cancel_event=cancel_event,
+            fingerprint=fingerprint,
+        )
+    tracks = _apply_identity_overrides(tracks, identity_overrides)
     by_hash: dict[str, list[RegularTrack]] = {}
     for track in tracks:
         if track.sha256:
@@ -237,6 +278,7 @@ def dedup_regular_folder(
     progress: Callable[[int, int, str], None] | None = None,
     cancel_event=None,
     fingerprint: bool = False,
+    identity_overrides: dict[str, tuple[str, str]] | None = None,
 ) -> dict:
     """Compatibility wrapper returning a read-only regular dedup report."""
     findings = analyze_regular_duplicates(
@@ -245,6 +287,7 @@ def dedup_regular_folder(
         progress=progress,
         cancel_event=cancel_event,
         fingerprint=fingerprint,
+        identity_overrides=identity_overrides,
     )
     counts = {
         "groups": len(findings),
@@ -271,5 +314,6 @@ def dedup_regular_folder(
 __all__ = [
     "RegularTrack",
     "analyze_regular_duplicates",
+    "collect_tracks",
     "dedup_regular_folder",
 ]

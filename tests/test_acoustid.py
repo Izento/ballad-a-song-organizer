@@ -6,6 +6,16 @@ from types import SimpleNamespace
 from renamer import acoustid
 
 
+def test_cache_write_batch_flushes_once_when_complete(monkeypatch):
+    saves = []
+    monkeypatch.setattr(acoustid, "_save_cache", lambda: saves.append(True))
+
+    with acoustid.cache_write_batch():
+        assert saves == []
+
+    assert saves == [True]
+
+
 def test_lookup_uses_precomputed_fingerprint(monkeypatch):
     calls = {}
 

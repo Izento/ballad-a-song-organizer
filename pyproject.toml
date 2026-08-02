@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "song-organizer"
+name = "ballad-a-song-organizer"
 version = "0.1.0"
 description = "Review-first music library organizer"
 requires-python = ">=3.11"
@@ -21,13 +21,26 @@ test = ["pytest>=8.0.0"]
 build = ["pyinstaller>=6.0.0"]
 
 [project.scripts]
-ballad = "cli:main"
+ballad = "ballad:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
 [tool.setuptools]
-py-modules = ["main"]
+packages = [
+    "ballad",
+    "cli",
+    "cli.commands",
+    "gui",
+    "renamer",
+    "renamer.domain",
+    "renamer.media",
+    "renamer.media.adapters",
+    "renamer.naming",
+    "renamer.online",
+    "renamer.planners",
+    "renamer.transactions",
+]
 
-[tool.setuptools.packages.find]
-include = ["cli*", "renamer*", "gui*"]
+[tool.setuptools.package-dir]
+ballad = "src/ballad"

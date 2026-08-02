@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 from typing import Callable
 
+from .domain.issues import ReviewIssue
 from .media import read_media
 from .regular_parser import format_title, parse_regular_stem
 from .review_models import FileSnapshot, TagProposal, path_key, proposal_id
@@ -68,7 +69,12 @@ def audit_tag_file(path: str) -> TagProposal | None:
     if before == after:
         return None
 
-    snapshot = FileSnapshot.capture(path, tags=current, include_hash=True)
+    snapshot = FileSnapshot.capture(
+        path,
+        tags=current,
+        artwork=media.artwork,
+        include_hash=True,
+    )
     digest = {
         "before": before,
         "after": after,
@@ -113,7 +119,7 @@ def audit_tags_for_folder(
             )
         if progress:
             progress(index, len(paths), path)
-    return proposals, issues
+    return proposals, [ReviewIssue.from_dict(issue) for issue in issues]
 
 
 __all__ = [

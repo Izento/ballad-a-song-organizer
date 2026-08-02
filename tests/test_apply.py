@@ -1,10 +1,13 @@
 # pylint: disable=import-error
 
 import json
+import hashlib
 from pathlib import Path
+import shutil
 
 from renamer import apply as apply_module
 from renamer.media import MediaRead
+from renamer.media import read_media
 from renamer.review_models import (
     ApplyResult,
     FileSnapshot,
@@ -12,6 +15,7 @@ from renamer.review_models import (
     ReviewPlan,
     TagProposal,
 )
+from renamer.tag_writer import write_tags_to_file
 
 
 def _test_app_paths(root: Path):
@@ -138,7 +142,11 @@ def test_tag_apply_restores_backup(tmp_path, monkeypatch):
 
     assert results[0].status == "succeeded"
     assert Path(results[0].backup_path).exists()
-    assert written == [(str(source), {"artist": "Artist", "title": "Song"})]
+    assert written[0][0] != str(source)
+    assert Path(written[0][0]).suffix == ".mp3"
+    assert written[0][1] == {"artist": "Artist", "title": "Song"}
+    backup = json.loads(Path(results[0].backup_path).read_text(encoding="utf-8"))
+    assert backup["before"] == {"artist": "Wrong", "title": "Wrong"}
 
 
 def test_apply_rejects_existing_unrelated_destination(tmp_path, monkeypatch):
@@ -333,6 +341,224 @@ def test_apply_continues_after_unrelated_destination_block(tmp_path, monkeypatch
     assert blocked_source.read_bytes() == b"blocked"
     assert blocked_destination.read_bytes() == b"existing"
     assert apply_module.batches_requiring_recovery() == []
+
+
+def test_undo_restores_compact_tag_snapshot(tmp_path, monkeypatch):
+    source = tmp_path / "Artist - Song.mp3"
+    source.write_bytes(b"post-write")
+    state = tmp_path / "state"
+    paths = _test_app_paths(state)
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: paths)
+    backup = paths["backups"] / "batch" / "tag.metadata.json"
+    backup.parent.mkdir(parents=True)
+    backup.write_text(
+        json.dumps(
+            {
+                "before": {"artist": "Old Artist", "title": "Old Title"},
+                "artwork_before": None,
+            }
+        ),
+        encoding="utf-8",
+    )
+    written = []
+    monkeypatch.setattr(
+        apply_module,
+        "write_tags_to_file",
+        lambda path, values, _artwork=None, **_kwargs: (
+            written.append((path, values)) or {"status": "updated"}
+        ),
+    )
+    monkeypatch.setattr(
+        apply_module,
+        "read_media",
+        lambda path: MediaRead(
+            path=path,
+            status="ok",
+            container="MP3",
+            tags={"artist": "Old Artist", "title": "Old Title"},
+        ),
+    )
+    journal = {
+        "batch_id": "batch",
+        "status": "completed",
+        "actions": [
+            {
+                "kind": "tag",
+                "status": "completed",
+                "proposal_id": "tag",
+                "path": str(source),
+                "backup_path": str(backup),
+                "post_hash": apply_module.sha256_file(str(source)),
+            }
+        ],
+    }
+    (paths["journals"] / "batch.json").write_text(
+        json.dumps(journal),
+        encoding="utf-8",
+    )
+
+    results = apply_module.undo_batch("batch")
+
+    assert results[0].status == "succeeded"
+    assert written[0][0] != str(source)
+    assert written[0][1] == {
+        "artist": "Old Artist",
+        "title": "Old Title",
+    }
+
+
+def test_undo_discards_interrupted_tag_temporary_file(tmp_path, monkeypatch):
+    source = tmp_path / "Artist - Song.mp3"
+    source.write_bytes(b"original")
+    temporary = tmp_path / ".songorganizer-batch-tag.mp3"
+    temporary.write_bytes(b"temporary")
+    state = tmp_path / "state"
+    paths = _test_app_paths(state)
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: paths)
+    backup = paths["backups"] / "batch" / "tag.metadata.json"
+    backup.parent.mkdir(parents=True)
+    backup.write_text(json.dumps({"before": {}}), encoding="utf-8")
+    (paths["journals"] / "batch.json").write_text(
+        json.dumps(
+            {
+                "batch_id": "batch",
+                "status": "applying",
+                "actions": [
+                    {
+                        "kind": "tag",
+                        "status": "intent",
+                        "proposal_id": "tag",
+                        "path": str(source),
+                        "backup_path": str(backup),
+                        "temporary_path": str(temporary),
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    results = apply_module.undo_batch("batch")
+
+    assert results[0].status == "succeeded"
+    assert not temporary.exists()
+    assert source.read_bytes() == b"original"
+
+
+def test_undo_restores_original_front_artwork_bytes(tmp_path, monkeypatch):
+    fixtures = Path(__file__).parent / "fixtures"
+    source = tmp_path / "Artist - Song.mp3"
+    shutil.copy2(fixtures / "sample.mp3", source)
+    original_cover = fixtures / "cover.jpg"
+    replacement_cover = fixtures / "cover.png"
+    original_art = {
+        "path": str(original_cover),
+        "sha256": hashlib.sha256(original_cover.read_bytes()).hexdigest(),
+        "size": original_cover.stat().st_size,
+        "mime_type": "image/jpeg",
+    }
+    replacement_art = {
+        "path": str(replacement_cover),
+        "sha256": hashlib.sha256(replacement_cover.read_bytes()).hexdigest(),
+        "size": replacement_cover.stat().st_size,
+        "mime_type": "image/png",
+        "release_id": "release",
+        "source_url": "https://example.invalid/cover.png",
+    }
+    assert write_tags_to_file(
+        str(source),
+        {"artist": "Old", "title": "Song"},
+        original_art,
+    ) == {"status": "updated"}
+    before = read_media(str(source))
+    proposal = TagProposal(
+        id="tag-artwork",
+        decision_group_id="song",
+        snapshot=FileSnapshot.capture(
+            str(source),
+            tags=before.tags,
+            artwork=before.artwork,
+            include_hash=True,
+        ),
+        path=str(source),
+        before=before.tags,
+        after={"artist": "New", "title": "Song"},
+        confidence="high",
+        reason="test",
+        artwork_before=before.artwork,
+        artwork_after=replacement_art,
+    )
+    plan = ReviewPlan.create(str(tmp_path), False, tag_proposals=[proposal])
+    monkeypatch.setattr(
+        apply_module,
+        "ensure_app_dirs",
+        lambda: _test_app_paths(tmp_path / "state"),
+    )
+
+    applied = apply_module.apply_review_plan(plan, [proposal.id])
+    assert applied[0].status == "succeeded"
+    assert read_media(str(source)).artwork.sha256 == replacement_art["sha256"]
+
+    undone = apply_module.undo_batch(plan.batch_id)
+
+    assert undone[0].status == "succeeded"
+    assert read_media(str(source)).artwork.sha256 == original_art["sha256"]
+
+
+def test_undo_removes_artwork_when_original_had_none(tmp_path, monkeypatch):
+    fixtures = Path(__file__).parent / "fixtures"
+    source = tmp_path / "Artist - Song.mp3"
+    shutil.copy2(fixtures / "sample.mp3", source)
+    replacement_cover = fixtures / "cover.jpg"
+    replacement_art = {
+        "path": str(replacement_cover),
+        "sha256": hashlib.sha256(
+            replacement_cover.read_bytes()
+        ).hexdigest(),
+        "size": replacement_cover.stat().st_size,
+        "mime_type": "image/jpeg",
+        "release_id": "release",
+        "source_url": "https://example.invalid/cover.jpg",
+    }
+    assert write_tags_to_file(
+        str(source),
+        {"artist": "Old", "title": "Song"},
+        remove_artwork=True,
+    ) == {"status": "updated"}
+    before = read_media(str(source))
+    assert before.artwork is None
+    proposal = TagProposal(
+        id="tag-new-artwork",
+        decision_group_id="song",
+        snapshot=FileSnapshot.capture(
+            str(source),
+            tags=before.tags,
+            artwork=before.artwork,
+            include_hash=True,
+        ),
+        path=str(source),
+        before=before.tags,
+        after={"artist": "New", "title": "Song"},
+        confidence="high",
+        reason="test",
+        artwork_before=None,
+        artwork_after=replacement_art,
+    )
+    plan = ReviewPlan.create(str(tmp_path), False, tag_proposals=[proposal])
+    monkeypatch.setattr(
+        apply_module,
+        "ensure_app_dirs",
+        lambda: _test_app_paths(tmp_path / "state"),
+    )
+
+    applied = apply_module.apply_review_plan(plan, [proposal.id])
+    assert applied[0].status == "succeeded"
+    assert read_media(str(source)).artwork is not None
+
+    undone = apply_module.undo_batch(plan.batch_id)
+
+    assert undone[0].status == "succeeded"
+    assert read_media(str(source)).artwork is None
 
 
 def test_review_plan_round_trips_and_rejects_tampering(tmp_path):

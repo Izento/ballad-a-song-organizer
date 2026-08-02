@@ -12,9 +12,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .domain.identity import Evidence
+from .domain.issues import ReviewIssue, apply_eligible, proposal_issues, requires_review
+from .domain.metadata import (
+    ArtworkDescriptor,
+    CanonicalMetadata,
+    StagedArtwork,
+    artwork_to_dict,
+)
+
 
 APP_VERSION = "0.1.0"
-PLAN_SCHEMA_VERSION = 1
+PLAN_SCHEMA_VERSION = 2
 
 
 def canonical_path(path: str) -> str:
@@ -51,14 +60,28 @@ class FileSnapshot:
     file_id: str | None
     size: int
     mtime_ns: int
-    tags: dict[str, str] = field(default_factory=dict)
+    tags: CanonicalMetadata = field(default_factory=CanonicalMetadata)
+    artwork: ArtworkDescriptor | None = None
     sha256: str | None = None
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "tags", CanonicalMetadata.coerce(self.tags))
+        object.__setattr__(
+            self,
+            "artwork",
+            (
+                self.artwork
+                if isinstance(self.artwork, ArtworkDescriptor)
+                else ArtworkDescriptor.from_dict(self.artwork)
+            ),
+        )
 
     @classmethod
     def capture(
         cls,
         path: str,
-        tags: dict[str, str] | None = None,
+        tags: dict[str, Any] | None = None,
+        artwork: dict[str, Any] | None = None,
         include_hash: bool = False,
     ) -> "FileSnapshot":
         stat = os.stat(path)
@@ -77,7 +100,8 @@ class FileSnapshot:
             file_id=file_id,
             size=stat.st_size,
             mtime_ns=stat.st_mtime_ns,
-            tags=dict(tags or {}),
+            tags=CanonicalMetadata(tags),
+            artwork=ArtworkDescriptor.from_dict(artwork),
             sha256=digest,
         )
 
@@ -98,7 +122,15 @@ class FileSnapshot:
         return not require_hash or current.sha256 == self.sha256
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "path": self.path,
+            "file_id": self.file_id,
+            "size": self.size,
+            "mtime_ns": self.mtime_ns,
+            "tags": self.tags.to_dict(),
+            "artwork": artwork_to_dict(self.artwork),
+            "sha256": self.sha256,
+        }
 
 
 @dataclass(frozen=True)
@@ -108,15 +140,59 @@ class RenameProposal:
     snapshot: FileSnapshot
     old_path: str
     new_path: str
-    current_values: dict[str, str]
-    proposed_values: dict[str, str]
+    current_values: CanonicalMetadata
+    proposed_values: CanonicalMetadata
     confidence: str
     reason: str
     warnings: tuple[str, ...] = ()
     status: str = "pending"
+    review_issues: tuple[ReviewIssue, ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "current_values",
+            CanonicalMetadata.coerce(self.current_values),
+        )
+        object.__setattr__(
+            self,
+            "proposed_values",
+            CanonicalMetadata.coerce(self.proposed_values),
+        )
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        if not self.review_issues and self.warnings:
+            object.__setattr__(
+                self,
+                "review_issues",
+                proposal_issues(self.warnings),
+            )
+
+    @property
+    def requires_review(self) -> bool:
+        return requires_review(self.review_issues)
+
+    @property
+    def apply_eligible(self) -> bool:
+        return apply_eligible(self.review_issues)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "id": self.id,
+            "decision_group_id": self.decision_group_id,
+            "snapshot": self.snapshot.to_dict(),
+            "old_path": self.old_path,
+            "new_path": self.new_path,
+            "current_values": self.current_values.to_dict(),
+            "proposed_values": self.proposed_values.to_dict(),
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "warnings": list(self.warnings),
+            "status": self.status,
+        }
 
 
 @dataclass(frozen=True)
@@ -125,15 +201,75 @@ class TagProposal:
     decision_group_id: str
     snapshot: FileSnapshot
     path: str
-    before: dict[str, str]
-    after: dict[str, str]
+    before: CanonicalMetadata
+    after: CanonicalMetadata
     confidence: str
     reason: str
     warnings: tuple[str, ...] = ()
     status: str = "pending"
+    artwork_before: ArtworkDescriptor | None = None
+    artwork_after: StagedArtwork | None = None
+    evidence: Evidence = field(default_factory=Evidence)
+    review_issues: tuple[ReviewIssue, ...] = field(
+        default=(),
+        repr=False,
+        compare=False,
+    )
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "before", CanonicalMetadata.coerce(self.before))
+        object.__setattr__(self, "after", CanonicalMetadata.coerce(self.after))
+        object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(
+            self,
+            "artwork_before",
+            (
+                self.artwork_before
+                if isinstance(self.artwork_before, ArtworkDescriptor)
+                else ArtworkDescriptor.from_dict(self.artwork_before)
+            ),
+        )
+        object.__setattr__(
+            self,
+            "artwork_after",
+            (
+                self.artwork_after
+                if isinstance(self.artwork_after, StagedArtwork)
+                else StagedArtwork.from_dict(self.artwork_after)
+            ),
+        )
+        object.__setattr__(self, "evidence", Evidence.coerce(self.evidence))
+        if not self.review_issues and self.warnings:
+            object.__setattr__(
+                self,
+                "review_issues",
+                proposal_issues(self.warnings),
+            )
+
+    @property
+    def requires_review(self) -> bool:
+        return requires_review(self.review_issues)
+
+    @property
+    def apply_eligible(self) -> bool:
+        return apply_eligible(self.review_issues)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "id": self.id,
+            "decision_group_id": self.decision_group_id,
+            "snapshot": self.snapshot.to_dict(),
+            "path": self.path,
+            "before": self.before.to_dict(),
+            "after": self.after.to_dict(),
+            "confidence": self.confidence,
+            "reason": self.reason,
+            "warnings": list(self.warnings),
+            "status": self.status,
+            "artwork_before": artwork_to_dict(self.artwork_before),
+            "artwork_after": artwork_to_dict(self.artwork_after),
+            "evidence": self.evidence.to_dict(),
+        }
 
 
 @dataclass(frozen=True)
@@ -142,12 +278,24 @@ class DuplicateFinding:
     paths: tuple[str, ...]
     classification: str
     recommendation: str
-    evidence: dict[str, Any]
+    evidence: Evidence
     confidence: str
     status: str = "read_only"
 
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "paths", tuple(self.paths))
+        object.__setattr__(self, "evidence", Evidence.coerce(self.evidence))
+
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        return {
+            "id": self.id,
+            "paths": list(self.paths),
+            "classification": self.classification,
+            "recommendation": self.recommendation,
+            "evidence": self.evidence.to_dict(),
+            "confidence": self.confidence,
+            "status": self.status,
+        }
 
 
 @dataclass(frozen=True)
@@ -161,8 +309,20 @@ class ReviewPlan:
     rename_proposals: tuple[RenameProposal, ...] = ()
     tag_proposals: tuple[TagProposal, ...] = ()
     duplicate_findings: tuple[DuplicateFinding, ...] = ()
-    issues: tuple[dict[str, Any], ...] = ()
+    issues: tuple[ReviewIssue, ...] = ()
     digest: str = ""
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "issues",
+            tuple(
+                issue
+                if isinstance(issue, ReviewIssue)
+                else ReviewIssue.from_dict(issue)
+                for issue in self.issues
+            ),
+        )
 
     @classmethod
     def create(
@@ -172,7 +332,8 @@ class ReviewPlan:
         rename_proposals: list[RenameProposal] | tuple[RenameProposal, ...] = (),
         tag_proposals: list[TagProposal] | tuple[TagProposal, ...] = (),
         duplicate_findings: list[DuplicateFinding] | tuple[DuplicateFinding, ...] = (),
-        issues: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+        issues: list[dict[str, Any] | ReviewIssue]
+        | tuple[dict[str, Any] | ReviewIssue, ...] = (),
     ) -> "ReviewPlan":
         plan = cls(
             batch_id=uuid.uuid4().hex,
@@ -184,7 +345,12 @@ class ReviewPlan:
             rename_proposals=tuple(rename_proposals),
             tag_proposals=tuple(tag_proposals),
             duplicate_findings=tuple(duplicate_findings),
-            issues=tuple(issues),
+            issues=tuple(
+                issue
+                if isinstance(issue, ReviewIssue)
+                else ReviewIssue.from_dict(issue)
+                for issue in issues
+            ),
         )
         digest = plan._computed_digest()
         return cls(
@@ -221,6 +387,9 @@ class ReviewPlan:
                     **value,
                     "snapshot": snapshot_from(value["snapshot"]),
                     "warnings": tuple(value.get("warnings", ())),
+                    "artwork_before": value.get("artwork_before"),
+                    "artwork_after": value.get("artwork_after"),
+                    "evidence": dict(value.get("evidence", {})),
                 }
             )
 
@@ -301,7 +470,7 @@ class ReviewPlan:
             "duplicate_findings": [
                 item.to_dict() for item in self.duplicate_findings
             ],
-            "issues": list(self.issues),
+            "issues": [item.to_dict() for item in self.issues],
         }
         if include_digest:
             result["digest"] = self.digest

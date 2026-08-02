@@ -40,6 +40,8 @@ def _dispatch(command: str, args, output: Output) -> int:
         from cli.commands.audit import run
     elif command == "tags":
         from cli.commands.tags import run
+    elif command == "enrich":
+        from cli.commands.enrich import run
     elif command == "dedup":
         from cli.commands.dedup import run
     elif command == "auto-detect":

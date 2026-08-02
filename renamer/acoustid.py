@@ -4,14 +4,22 @@ import json
 import math
 import os
 import threading
+from contextlib import contextmanager
 
 from .fingerprint import fingerprint_file_details
-from .regular_parser import normalize_text, parse_regular_filename
+from .naming.identity import filename_identity_hint
+from .online import Provider, ProviderError, RateLimiter, RequestPolicy
+from .regular_parser import normalize_text
 from .runtime import atomic_write_json, app_paths, resolve_fpcalc
 
 _CACHE_PATH = str(app_paths()['cache'] / 'acoustid_cache.json')
 _cache: dict | None = None
 _CACHE_LOCK = threading.RLock()
+_CACHE_BATCH_DEPTH = 0
+_REQUEST_POLICY = RequestPolicy(
+    provider=Provider.ACOUSTID,
+    limiter=RateLimiter(1 / 3),
+)
 
 MIN_CONFIDENCE = 0.70
 _CACHE_VERSION = 3
@@ -33,10 +41,32 @@ def _save_cache() -> None:
     with _CACHE_LOCK:
         if _cache is None:
             return
-        try:
-            atomic_write_json(app_paths()['cache'] / 'acoustid_cache.json', _cache)
-        except OSError:
-            pass
+        snapshot = dict(_cache)
+    try:
+        atomic_write_json(app_paths()['cache'] / 'acoustid_cache.json', snapshot)
+    except OSError:
+        pass
+
+
+@contextmanager
+def cache_write_batch():
+    """Persist AcoustID cache once after a concurrent batch completes."""
+    global _CACHE_BATCH_DEPTH  # pylint: disable=global-statement
+    with _CACHE_LOCK:
+        _CACHE_BATCH_DEPTH += 1
+    try:
+        yield
+    finally:
+        with _CACHE_LOCK:
+            _CACHE_BATCH_DEPTH -= 1
+            flush = _CACHE_BATCH_DEPTH == 0
+        if flush:
+            _save_cache()
+
+
+def _cache_should_flush() -> bool:
+    with _CACHE_LOCK:
+        return _CACHE_BATCH_DEPTH == 0
 
 
 def _file_key(path: str) -> str:
@@ -49,13 +79,6 @@ def _file_key(path: str) -> str:
         )
     except OSError:
         return f"v{_CACHE_VERSION}|{path}"
-
-
-def _filename_identity_hint(path: str) -> tuple[str, str]:
-    parsed = parse_regular_filename(os.path.basename(path))
-    if parsed is None:
-        return "", ""
-    return parsed.artist, parsed.title
 
 
 def _identity_similarity(
@@ -114,7 +137,7 @@ def _select_recording(response: dict, path: str) -> tuple[float, dict] | None:
         scored_results.append((score, result))
     scored_results.sort(key=lambda value: value[0], reverse=True)
 
-    filename_hint = _filename_identity_hint(path)
+    filename_hint = filename_identity_hint(path) or ("", "")
     while scored_results:
         score = scored_results[0][0]
         if score < MIN_CONFIDENCE:
@@ -186,11 +209,18 @@ def lookup(path: str, api_key: str) -> dict | None:
         if fingerprint_error or not fingerprint or duration is None:
             return None
 
-        response = acoustid.lookup(
-            api_key,
-            fingerprint,
-            duration,
-            meta=['recordings', 'sources'],
+        response = _REQUEST_POLICY.request(
+            lambda: acoustid.lookup(
+                api_key,
+                fingerprint,
+                duration,
+                meta=['recordings', 'sources'],
+            ),
+            transient_errors=(
+                acoustid.WebServiceError,
+                acoustid.NoBackendError,
+                OSError,
+            ),
         )
         if response.get("status") != "ok":
             raise acoustid.WebServiceError(
@@ -211,6 +241,7 @@ def lookup(path: str, api_key: str) -> dict | None:
         acoustid.FingerprintGenerationError,
         acoustid.WebServiceError,
         acoustid.NoBackendError,
+        ProviderError,
         OSError,
     ):
         # fpcalc missing/broken, API error, or file unreadable.
@@ -219,6 +250,7 @@ def lookup(path: str, api_key: str) -> dict | None:
 
     with _CACHE_LOCK:
         cache[key] = result
+    if _cache_should_flush():
         _save_cache()
     return result
 

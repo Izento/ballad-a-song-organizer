@@ -2,25 +2,21 @@
 
 from __future__ import annotations
 
+import json
 import os
 import queue
 import subprocess
-import threading
 from dataclasses import replace
-from datetime import datetime, timezone
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from renamer.apply import (
-    apply_review_plan,
     batch_history,
     batches_requiring_recovery,
     latest_undoable_batch,
-    undo_batch,
 )
 from renamer.review_api import (
-    analyze_folder,
     coordinate_tag_proposals,
     refresh_rename_readiness,
 )
@@ -30,41 +26,128 @@ from renamer.review_models import (
     path_key,
     proposal_id,
 )
+from renamer.musicbrainz import is_available as musicbrainz_available
 from renamer.runtime import (
     ensure_app_dirs,
     resolve_acoustid_key,
     resolve_fpcalc,
     resource_path,
 )
+from renamer.selection import (
+    action_items as _action_items,
+    expand_group_selection as _expand_group_selection,
+    grouped_action_ids as _grouped_action_ids,
+    ready_ids as _ready_ids,
+    recommended_ids as _recommended_ids,
+    requires_review as _requires_review,
+)
+from gui.workers import BackgroundJobs
+from gui.presentation import (
+    filename_validation_error as _filename_validation_error,
+    format_local_timestamp as _format_local_timestamp,
+    plan_rows,
+    tag_display as _tag_display,
+)
 
 
 GUI_TITLE = "Ballad"
 _WINDOWS_APP_ID = "Ballad.SongOrganizer"
-_WINDOWS_UNSAFE_FILENAME_CHARS = set('<>:"/\\|?*')
 _FIXED_TREE_COLUMNS = {"selected", "action", "confidence"}
 _TREE_STYLE = "Ballad.Treeview"
-_REVIEW_REQUIRED_WARNING_PREFIXES = (
-    "Destination collides with another proposal.",
-    "Destination already exists:",
-    "Version qualifier conflicts with AcoustID metadata;",
-)
+# Green reads as "go / confirm" rather than a neutral link color, and this
+# button is the single call-to-action driving the whole review workflow.
+_PRIMARY_BUTTON_BG = "#238636"
+_PRIMARY_BUTTON_ACTIVE_BG = "#2ea043"
+_PRIMARY_BUTTON_DISABLED_FG = "#d3f4dc"
+_ACTIVITY_SIDEBAR_WIDTH = 320
+_ACTIVITY_COLLAPSED_WIDTH = 82
+_SHIFT_MASK = 0x0001
+# Rows worth a second look shouldn't blend in with everything that's safe to
+# accept at a glance. "review" and "error" share the "low" styling because
+# they represent the same thing to a user scanning the grid: don't trust
+# this one without looking closer.
+_CONFIDENCE_ROW_STYLES = {
+    "low": ("#f8d7da", "#842029"),
+    "review": ("#f8d7da", "#842029"),
+    "error": ("#f8d7da", "#842029"),
+    "medium": ("#fff3cd", "#664d03"),
+    "warning": ("#fff3cd", "#664d03"),
+}
 
 
-def _format_local_timestamp(value: str) -> str:
-    try:
-        timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
-        local = timestamp.astimezone()
-        return local.strftime("%Y-%m-%d %I:%M:%S %p %Z")
-    except (TypeError, ValueError):
-        return value
+def _confidence_row_tags(confidence: str) -> tuple[str, ...]:
+    if confidence in _CONFIDENCE_ROW_STYLES:
+        return (f"conf-{confidence}",)
+    return ()
 
 
-def _tag_display(values: dict[str, str]) -> str:
-    return " / ".join(
-        value for value in (values.get("artist", ""), values.get("title", "")) if value
-    )
+def _format_progress_log(
+    stage: str,
+    current: int,
+    total: int,
+    path: str,
+) -> str:
+    location = path or "working"
+    return f"{stage}: {current}/{total}  {location}"
+
+
+class _Tooltip:
+    """Minimal hover tooltip for a single widget.
+
+    Several controls here (e.g. the duplicate-fingerprinting checkbox) have
+    a name that's easy to misread as controlling more than it does. A short
+    delayed tooltip clarifies scope without permanently cluttering the
+    layout with explanatory labels.
+    """
+
+    _DELAY_MS = 450
+
+    def __init__(self, widget: tk.Widget, text: str) -> None:
+        self.widget = widget
+        self.text = text
+        self._after_id: str | None = None
+        self._tip: tk.Toplevel | None = None
+        widget.bind("<Enter>", self._schedule, add="+")
+        widget.bind("<Leave>", self._hide, add="+")
+        widget.bind("<ButtonPress>", self._hide, add="+")
+
+    def _schedule(self, _event=None) -> None:
+        self._cancel_pending()
+        self._after_id = self.widget.after(self._DELAY_MS, self._show)
+
+    def _cancel_pending(self) -> None:
+        if self._after_id is not None:
+            self.widget.after_cancel(self._after_id)
+            self._after_id = None
+
+    def _show(self) -> None:
+        if self._tip is not None or not self.widget.winfo_viewable():
+            return
+        x = self.widget.winfo_rootx() + 4
+        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        self._tip = tk.Toplevel(self.widget)
+        self._tip.wm_overrideredirect(True)
+        self._tip.wm_geometry(f"+{x}+{y}")
+        ttk.Label(
+            self._tip,
+            text=self.text,
+            background="#ffffe0",
+            relief=tk.SOLID,
+            borderwidth=1,
+            padding=(6, 3),
+            wraplength=320,
+            justify=tk.LEFT,
+        ).pack()
+
+    def _hide(self, _event=None) -> None:
+        self._cancel_pending()
+        if self._tip is not None:
+            self._tip.destroy()
+            self._tip = None
+
+
+def _add_tooltip(widget: tk.Widget, text: str) -> None:
+    _Tooltip(widget, text)
 
 
 class _FilenameDialog(simpledialog.Dialog):
@@ -97,86 +180,6 @@ def _ask_filename(parent, initialvalue: str) -> str | None:
     return _FilenameDialog(parent, initialvalue).result
 
 
-def _is_high_confidence_action(item) -> bool:
-    return item.confidence == "high" and not item.warnings
-
-
-def _action_items(plan: ReviewPlan):
-    return (*plan.rename_proposals, *plan.tag_proposals)
-
-
-def _requires_review(item) -> bool:
-    return any(
-        warning.startswith(_REVIEW_REQUIRED_WARNING_PREFIXES)
-        for warning in item.warnings
-    )
-
-
-def _action_label(item, default: str) -> str:
-    return "Needs review" if _requires_review(item) else default
-
-
-def _grouped_action_ids(plan: ReviewPlan) -> dict[str, set[str]]:
-    groups: dict[str, set[str]] = {}
-    for item in _action_items(plan):
-        groups.setdefault(item.decision_group_id, set()).add(item.id)
-    return groups
-
-
-def _ready_ids(plan: ReviewPlan) -> set[str]:
-    items_by_group: dict[str, list] = {}
-    for item in _action_items(plan):
-        items_by_group.setdefault(item.decision_group_id, []).append(item)
-    return {
-        item.id
-        for items in items_by_group.values()
-        if not any(_requires_review(item) for item in items)
-        for item in items
-    }
-
-
-def _expand_group_selection(plan: ReviewPlan, selected_ids) -> set[str]:
-    groups = _grouped_action_ids(plan)
-    selected = set(selected_ids)
-    selected_groups = {
-        group_id
-        for group_id, item_ids in groups.items()
-        if selected & item_ids
-    }
-    return {
-        item_id
-        for group_id in selected_groups
-        for item_id in groups[group_id]
-    } & _ready_ids(plan)
-
-
-def _recommended_ids(plan: ReviewPlan) -> set[str]:
-    """Return high-confidence actions without unresolved safety warnings."""
-    items_by_group: dict[str, list] = {}
-    for item in _action_items(plan):
-        items_by_group.setdefault(item.decision_group_id, []).append(item)
-    return {
-        item.id
-        for items in items_by_group.values()
-        if all(_is_high_confidence_action(item) for item in items)
-        for item in items
-    }
-
-
-def _filename_validation_error(filename: str, old_path: str) -> str | None:
-    if not filename:
-        return "Enter a filename."
-    if filename in {".", ".."}:
-        return "That is not a valid filename."
-    if any(character in _WINDOWS_UNSAFE_FILENAME_CHARS for character in filename):
-        return "The filename contains characters Windows does not allow."
-    if filename.endswith((" ", ".")):
-        return "A Windows filename cannot end with a space or period."
-    if Path(filename).suffix.casefold() != Path(old_path).suffix.casefold():
-        return "Keep the original file extension."
-    return None
-
-
 def _set_windows_app_identity() -> None:
     if os.name != "nt":
         return
@@ -200,24 +203,50 @@ class SongOrganizerApp:
         self._set_window_icon()
         self.root.geometry("1180x720")
         self.root.minsize(900, 560)
-        self.events: queue.Queue = queue.Queue()
-        self.worker: threading.Thread | None = None
-        self.cancel_event = threading.Event()
+        self.jobs = BackgroundJobs()
+        self.events = self.jobs.events
         self.plan: ReviewPlan | None = None
         self.selected_ids: set[str] = set()
+        self._applied_group_ids: set[str] = set()
         self._row_ids: dict[tuple[str, str], str] = {}
         self._row_paths: dict[tuple[str, str], str] = {}
+        self._tree_headings: dict[str, dict[str, str]] = {}
+        self._sort_state: dict[tuple[str, str], bool] = {}
+        self._selection_anchors: dict[str, str] = {}
+        self.activity_container: ttk.Frame
+        self.activity_panel: ttk.Labelframe
+        self.activity_log: tk.Text
+        self.activity_show_button: ttk.Button
+        self._recovery_overrides: set[str] = set()
 
         self.folder_var = tk.StringVar()
         self.recursive_var = tk.BooleanVar(value=True)
         fpcalc_path = resolve_fpcalc()
+        self.fpcalc_available = fpcalc_path is not None
+        self.duplicate_check_var = tk.BooleanVar(value=True)
+        self.duplicate_check_var.trace_add(
+            "write", self._sync_fingerprint_availability
+        )
         self.fingerprint_var = tk.BooleanVar(value=fpcalc_path is not None)
+        self._last_run_checked_duplicates = True
         self.status_var = tk.StringVar(value="Choose a folder to begin.")
+        self._activity_sidebar_open = True
         self.acoustid_key = resolve_acoustid_key()
+        self.musicbrainz_available = musicbrainz_available()
+        self.online_identification_var = tk.BooleanVar(
+            value=bool(self.acoustid_key and fpcalc_path)
+        )
+        self.cover_art_var = tk.BooleanVar(value=True)
         fpcalc_state = (
             "available" if fpcalc_path else "not installed (optional)"
         )
-        online_state = "enabled" if self.acoustid_key else "skipped"
+        online_state = (
+            "ready"
+            if self.acoustid_key and fpcalc_path and self.musicbrainz_available
+            else "MusicBrainz client missing"
+            if not self.musicbrainz_available
+            else "embedded IDs only"
+        )
         self.capability_var = tk.StringVar(
             value=(
                 f"Fingerprint helper: {fpcalc_state} | "
@@ -285,37 +314,99 @@ class SongOrganizerApp:
             self._icon_handles = ()
 
     def _build_ui(self) -> None:
-        top = ttk.Frame(self.root, padding=10)
-        top.pack(fill=tk.X)
-        ttk.Label(top, text="Music folder:").pack(side=tk.LEFT)
-        ttk.Entry(top, textvariable=self.folder_var).pack(
+        library = ttk.Labelframe(self.root, text="Library", padding=10)
+        library.pack(fill=tk.X, padx=10, pady=(10, 6))
+        folder_row = ttk.Frame(library)
+        folder_row.pack(fill=tk.X)
+        ttk.Label(folder_row, text="Music folder:").pack(side=tk.LEFT)
+        ttk.Entry(folder_row, textvariable=self.folder_var).pack(
             side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 5)
         )
-        ttk.Button(top, text="Browse…", command=self._browse).pack(side=tk.LEFT)
+        ttk.Button(folder_row, text="Browse…", command=self._browse).pack(
+            side=tk.LEFT
+        )
         ttk.Checkbutton(
-            top,
+            folder_row,
             text="Include subfolders",
             variable=self.recursive_var,
-        ).pack(side=tk.LEFT, padx=10)
-        ttk.Checkbutton(
-            top,
-            text="Use fingerprints for duplicate checks",
-            variable=self.fingerprint_var,
-        ).pack(side=tk.LEFT, padx=(0, 10))
-        self.analyze_button = ttk.Button(
-            top, text="Analyze", command=self._analyze
-        )
-        self.analyze_button.pack(side=tk.LEFT)
-        ttk.Label(top, textvariable=self.capability_var).pack(
-            side=tk.LEFT, padx=(10, 0)
+        ).pack(side=tk.LEFT, padx=(10, 0))
+        ttk.Label(library, textvariable=self.capability_var).pack(
+            anchor=tk.W, pady=(6, 0)
         )
 
-        self.notebook = ttk.Notebook(self.root)
-        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+        options = ttk.Labelframe(
+            self.root, text="Identification & duplicate detection", padding=10
+        )
+        options.pack(fill=tk.X, padx=10, pady=(0, 6))
+        self.online_identification_check = ttk.Checkbutton(
+            options,
+            text="Use AcoustID identification",
+            variable=self.online_identification_var,
+            state=(
+                tk.NORMAL
+                if self.acoustid_key and self.fpcalc_available
+                else tk.DISABLED
+            ),
+        )
+        self.online_identification_check.pack(side=tk.LEFT)
+        _add_tooltip(
+            self.online_identification_check,
+            "Identify songs with missing or unreliable tags by audio "
+            "fingerprint via AcoustID, then look up the match in "
+            "MusicBrainz. Requires an AcoustID API key and the fpcalc "
+            "helper tool.",
+        )
+        self.cover_art_check = ttk.Checkbutton(
+            options,
+            text="Embed missing front cover art",
+            variable=self.cover_art_var,
+        )
+        self.cover_art_check.pack(side=tk.LEFT, padx=(16, 0))
+        _add_tooltip(
+            self.cover_art_check,
+            "Download and embed front cover art from the Cover Art Archive "
+            "for files that don't already have any.",
+        )
+        self.duplicate_check_check = ttk.Checkbutton(
+            options,
+            text="Check for duplicate files",
+            variable=self.duplicate_check_var,
+        )
+        self.duplicate_check_check.pack(side=tk.LEFT, padx=(16, 0))
+        _add_tooltip(
+            self.duplicate_check_check,
+            "Hashes every file to find exact and same-song duplicates. If "
+            "you already know this folder has no duplicates (just messy "
+            "filenames), turning this off skips hashing every file and can "
+            "noticeably speed up large libraries.",
+        )
+        self.fingerprint_check = ttk.Checkbutton(
+            options,
+            text="Fingerprint audio for stronger duplicate matches",
+            variable=self.fingerprint_var,
+        )
+        self.fingerprint_check.pack(side=tk.LEFT, padx=(16, 0))
+        _add_tooltip(
+            self.fingerprint_check,
+            "Duplicate detection always runs (exact file and title/artist "
+            "matches). Enabling this additionally computes an acoustic "
+            "fingerprint per file so re-encoded or transcoded copies are "
+            "still caught, not just identical files. Slower on large "
+            "libraries. Has no effect while duplicate checking is off.",
+        )
+        self._sync_fingerprint_availability()
+
+        content = ttk.Frame(self.root)
+        content.pack(fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
+        content.columnconfigure(0, weight=1)
+        content.rowconfigure(0, weight=1)
+
+        self.notebook = ttk.Notebook(content)
+        self.notebook.grid(row=0, column=0, sticky=tk.NSEW)
         self.trees: dict[str, ttk.Treeview] = {}
         for key, title in (
-            ("renames", "Proposed renames"),
-            ("tags", "Tag disagreements"),
+            ("renames", "Filename changes"),
+            ("tags", "Metadata changes"),
             ("duplicates", "Duplicate findings (read-only)"),
             ("errors", "Skipped / errors"),
         ):
@@ -323,6 +414,8 @@ class SongOrganizerApp:
             self.notebook.add(frame, text=title)
             tree = self._make_tree(frame, key)
             self.trees[key] = tree
+
+        self._build_activity_sidebar(content)
 
         bottom = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         bottom.pack(fill=tk.X)
@@ -370,20 +463,127 @@ class SongOrganizerApp:
             fill=tk.Y,
             padx=10,
         )
-        self.apply_button = tk.Button(
+        self.primary_button = tk.Button(
             secondary_actions,
-            text="Apply selected",
-            command=self._apply,
-            background="#1f6feb",
-            activebackground="#388bfd",
+            text="Organize library",
+            command=self._organize_library,
+            background=_PRIMARY_BUTTON_BG,
+            activebackground=_PRIMARY_BUTTON_ACTIVE_BG,
             foreground="white",
             activeforeground="white",
+            disabledforeground=_PRIMARY_BUTTON_DISABLED_FG,
             font=("TkDefaultFont", 10, "bold"),
-            padx=12,
-            pady=2,
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=14,
+            pady=3,
         )
-        self.apply_button.pack(side=tk.LEFT)
-        self._update_apply_button()
+        self.primary_button.pack(side=tk.LEFT)
+        self._update_primary_button()
+
+    def _build_activity_sidebar(self, parent: ttk.Frame) -> None:
+        self.activity_container = ttk.Frame(
+            parent,
+            width=_ACTIVITY_SIDEBAR_WIDTH,
+        )
+        self.activity_container.grid(
+            row=0,
+            column=1,
+            sticky=tk.NSEW,
+            padx=(8, 0),
+        )
+        self.activity_container.grid_propagate(False)
+        self.activity_container.columnconfigure(0, weight=1)
+        self.activity_container.rowconfigure(0, weight=1)
+
+        self.activity_panel = ttk.Labelframe(
+            self.activity_container,
+            text="Activity log",
+            padding=6,
+        )
+        self.activity_panel.grid(row=0, column=0, sticky=tk.NSEW)
+        self.activity_panel.columnconfigure(0, weight=1)
+        self.activity_panel.rowconfigure(1, weight=1)
+
+        header = ttk.Frame(self.activity_panel)
+        header.grid(row=0, column=0, sticky=tk.EW, pady=(0, 6))
+        header.columnconfigure(0, weight=1)
+        ttk.Label(
+            header,
+            text="Live progress",
+        ).grid(row=0, column=0, sticky=tk.W)
+        collapse_button = ttk.Button(
+            header,
+            text="Collapse",
+            command=self._toggle_activity_sidebar,
+        )
+        collapse_button.grid(row=0, column=1, sticky=tk.E)
+        _add_tooltip(
+            collapse_button,
+            "Hide the activity log. The log will remain available until "
+            "you show it again.",
+        )
+
+        log_frame = ttk.Frame(self.activity_panel)
+        log_frame.grid(row=1, column=0, sticky=tk.NSEW)
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+        self.activity_log = tk.Text(
+            log_frame,
+            wrap=tk.WORD,
+            state=tk.DISABLED,
+            font="TkFixedFont",
+            padx=6,
+            pady=6,
+        )
+        self.activity_log.grid(row=0, column=0, sticky=tk.NSEW)
+        scrollbar = ttk.Scrollbar(
+            log_frame,
+            orient=tk.VERTICAL,
+            command=self.activity_log.yview,
+        )
+        scrollbar.grid(row=0, column=1, sticky=tk.NS)
+        self.activity_log.configure(yscrollcommand=scrollbar.set)
+
+        self.activity_show_button = ttk.Button(
+            self.activity_container,
+            text="Show log",
+            command=self._toggle_activity_sidebar,
+            padding=(2, 2),
+        )
+        _add_tooltip(
+            self.activity_show_button,
+            "Show the live activity log.",
+        )
+
+    def _toggle_activity_sidebar(self) -> None:
+        if self._activity_sidebar_open:
+            self.activity_panel.grid_remove()
+            self.activity_show_button.grid(
+                row=0,
+                column=0,
+                sticky=tk.N,
+                pady=(8, 0),
+            )
+            self.activity_container.configure(width=_ACTIVITY_COLLAPSED_WIDTH)
+        else:
+            self.activity_show_button.grid_remove()
+            self.activity_panel.grid(row=0, column=0, sticky=tk.NSEW)
+            self.activity_container.configure(width=_ACTIVITY_SIDEBAR_WIDTH)
+        self._activity_sidebar_open = not self._activity_sidebar_open
+
+    def _clear_activity_log(self) -> None:
+        self.activity_log.configure(state=tk.NORMAL)
+        self.activity_log.delete("1.0", tk.END)
+        self.activity_log.configure(state=tk.DISABLED)
+
+    def _append_activity_log(self, message: str) -> None:
+        follow_tail = self.activity_log.yview()[1] >= 0.999
+        self.activity_log.configure(state=tk.NORMAL)
+        self.activity_log.insert(tk.END, f"{message}\n")
+        if follow_tail:
+            self.activity_log.see(tk.END)
+        self.activity_log.configure(state=tk.DISABLED)
 
     def _make_tree(self, parent: ttk.Frame, key: str) -> ttk.Treeview:
         if key == "renames":
@@ -444,15 +644,26 @@ class SongOrganizerApp:
         selectmode = "extended" if key in {"renames", "tags"} else "browse"
         style = ttk.Style(parent)
         style.configure(_TREE_STYLE, rowheight=24)
+        tree_frame = ttk.Frame(parent)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
         tree = ttk.Treeview(
-            parent,
+            tree_frame,
             columns=columns,
             show="headings",
             selectmode=selectmode,
             style=_TREE_STYLE,
         )
+        self._tree_headings[key] = dict(headings)
         for column in columns:
-            tree.heading(column, text=headings[column])
+            tree.heading(
+                column,
+                text=headings[column],
+                command=lambda tree_name=key, column=column: self._sort_tree_column(
+                    tree_name, column
+                ),
+            )
             fixed = column in _FIXED_TREE_COLUMNS
             tree.column(
                 column,
@@ -461,13 +672,32 @@ class SongOrganizerApp:
                 stretch=not fixed,
                 anchor=tk.CENTER if column in {"selected", "confidence"} else tk.W,
             )
-        scrollbar = ttk.Scrollbar(parent, orient=tk.VERTICAL, command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        for level, (background, foreground) in _CONFIDENCE_ROW_STYLES.items():
+            tree.tag_configure(f"conf-{level}", background=background, foreground=foreground)
+        vertical_scrollbar = ttk.Scrollbar(
+            tree_frame,
+            orient=tk.VERTICAL,
+            command=tree.yview,
+        )
+        horizontal_scrollbar = ttk.Scrollbar(
+            tree_frame,
+            orient=tk.HORIZONTAL,
+            command=tree.xview,
+        )
+        tree.configure(
+            yscrollcommand=vertical_scrollbar.set,
+            xscrollcommand=horizontal_scrollbar.set,
+        )
+        tree.grid(row=0, column=0, sticky=tk.NSEW)
+        vertical_scrollbar.grid(row=0, column=1, sticky=tk.NS)
+        horizontal_scrollbar.grid(row=1, column=0, sticky=tk.EW)
         tree.bind(
             "<Button-1>",
             lambda event, name=key: self._handle_tree_click(name, event),
+        )
+        tree.bind(
+            "<Double-Button-1>",
+            lambda event, name=key: self._handle_tree_double_click(name, event),
         )
         tree.bind(
             "<Button-3>",
@@ -480,74 +710,106 @@ class SongOrganizerApp:
         if selected:
             self.folder_var.set(selected)
 
+    def _sync_fingerprint_availability(self, *_args, busy: bool | None = None) -> None:
+        """Audio fingerprinting only matters while duplicate checking runs.
+
+        Rather than let it sit checked-but-inert when duplicate checking is
+        off (silently doing nothing, which is exactly the kind of ambiguity
+        that confused the old "Use fingerprints for duplicate checks"
+        label), grey it out so its state visibly reflects whether it can do
+        anything. ``busy`` is accepted explicitly because ``_set_busy(True)``
+        runs just before the background thread starts, while
+        ``self.jobs.active`` would still read False at that instant.
+        """
+        checking_duplicates = self.duplicate_check_var.get()
+        if busy is None:
+            busy = self.jobs.active
+        self.fingerprint_check.configure(
+            state=tk.NORMAL if checking_duplicates and not busy else tk.DISABLED
+        )
+
     def _set_busy(self, busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
-        self.analyze_button.configure(state=state)
+        self.online_identification_check.configure(
+            state=(
+                tk.DISABLED
+                if busy or not (self.acoustid_key and self.fpcalc_available)
+                else tk.NORMAL
+            )
+        )
+        self.cover_art_check.configure(state=state)
+        self.duplicate_check_check.configure(state=state)
+        self._sync_fingerprint_availability(busy=busy)
         self.edit_button.configure(state=state)
         self.cancel_button.configure(state=tk.NORMAL if busy else tk.DISABLED)
         self.history_button.configure(state=state)
         self.undo_button.configure(state=state)
         if busy:
-            self.apply_button.configure(state=tk.DISABLED)
+            self.primary_button.configure(state=tk.DISABLED)
             self.status_var.set("Working…")
         else:
-            self._update_apply_button()
+            self._update_primary_button()
 
-    def _analyze(self) -> None:
+    def _organize_library(self) -> None:
         folder = self.folder_var.get().strip()
         if not folder or not Path(folder).is_dir():
             messagebox.showerror("Folder required", "Choose an existing music folder.")
             return
+        if not self.musicbrainz_available:
+            messagebox.showerror(
+                "MusicBrainz unavailable",
+                "Metadata enrichment cannot run because musicbrainzngs is not "
+                "installed in this Python environment. Start Ballad with "
+                "'uv run ballad'.",
+            )
+            return
+        if not messagebox.askyesno(
+            "Organize library",
+            "Ballad will identify songs, enrich metadata, and prepare a "
+            "reviewable plan of filename changes, tag changes, and cover "
+            "art.\n\nNothing on disk changes until you select proposals "
+            "below and click 'Apply selected'. Duplicate findings are "
+            "always read-only.\n\nContinue?",
+        ):
+            return
         self.plan = None
         self.selected_ids.clear()
+        self._applied_group_ids = set()
         self._clear_trees()
-        self.cancel_event = threading.Event()
+        self._clear_activity_log()
+        self._append_activity_log(f"Starting analysis: {folder}")
         self._set_busy(True)
-        self.status_var.set("Analyzing read-only…")
-        recursive = self.recursive_var.get()
-        fingerprint = self.fingerprint_var.get()
-        acoustid_key = self.acoustid_key
-
-        def worker() -> None:
-            try:
-                plan = analyze_folder(
-                    folder,
-                    recursive=recursive,
-                    lookup=bool(acoustid_key),
-                    acoustid_key=acoustid_key,
-                    fingerprint=fingerprint,
-                    progress=lambda stage, current, total, path: self.events.put(
-                        ("progress", stage, current, total, path)
-                    ),
-                    cancel_event=self.cancel_event,
-                )
-                self.events.put(("analysis-complete", plan))
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                self.events.put(("failed", str(exc)))
-
-        self.worker = threading.Thread(target=worker, daemon=True)
-        self.worker.start()
+        self.status_var.set("Organizing library…")
+        acoustid_key = (
+            self.acoustid_key if self.online_identification_var.get() else None
+        )
+        self._last_run_checked_duplicates = self.duplicate_check_var.get()
+        self.jobs.organize(
+            folder,
+            recursive=self.recursive_var.get(),
+            fingerprint=self.fingerprint_var.get(),
+            acoustid_key=acoustid_key,
+            include_artwork=self.cover_art_var.get(),
+            include_duplicates=self._last_run_checked_duplicates,
+        )
 
     def _apply(self) -> None:
         if self.plan is None:
-            messagebox.showinfo("Nothing to apply", "Analyze a folder first.")
+            messagebox.showinfo(
+                "Nothing to apply",
+                "Organize a library first.",
+            )
             return
         if not self.selected_ids:
             messagebox.showinfo("Nothing selected", "Select at least one proposal.")
             return
         pending = batches_requiring_recovery(self.plan.root)
-        if pending:
-            messagebox.showwarning(
-                "Recovery required",
-                "Undo the latest incomplete batch from the History window before "
-                "applying new changes. This restores actions that completed before "
-                "the previous apply stopped.",
-            )
+        if pending and not self._confirm_recovery_override(pending, self.plan.root):
             return
         if not self.plan.validate_digest():
             messagebox.showerror(
                 "Plan invalid",
-                "The reviewed plan no longer matches its digest. Analyze again.",
+                "The reviewed plan no longer matches its digest. Organize again.",
             )
             return
         group_count = self._selection_group_count()
@@ -559,29 +821,41 @@ class SongOrganizerApp:
             return
         selected = tuple(self.selected_ids)
         plan = self.plan
-        self.cancel_event = threading.Event()
+        self._append_activity_log(
+            f"Applying selected changes for {group_count} song(s)."
+        )
         self._set_busy(True)
+        self.jobs.apply(plan, selected)
 
-        def worker() -> None:
-            try:
-                results = apply_review_plan(
-                    plan,
-                    selected,
-                    cancel_event=self.cancel_event,
-                    progress=lambda stage, current, total, result: self.events.put(
-                        ("progress", stage, current, total, result.path if result else "")
-                    ),
-                )
-                self.events.put(("apply-complete", results))
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                self.events.put(("failed", str(exc)))
-
-        self.worker = threading.Thread(target=worker, daemon=True)
-        self.worker.start()
+    def _confirm_recovery_override(
+        self,
+        pending: list[dict],
+        root: str,
+    ) -> bool:
+        root_key = path_key(root)
+        if root_key in self._recovery_overrides:
+            return True
+        batch_word = "batch" if len(pending) == 1 else "batches"
+        if not messagebox.askyesno(
+            "Recovery still unresolved",
+            f"{len(pending)} incomplete recovery {batch_word} for this folder "
+            "still contain actions that could not be restored.\n\n"
+            "You can retry 'Undo latest', or continue with the selected "
+            "changes anyway. Continuing will not repair the missing file and "
+            "may require manual cleanup of the older batch.\n\n"
+            "Continue applying the selected changes?",
+        ):
+            return False
+        self._recovery_overrides.add(root_key)
+        self._append_activity_log(
+            "Continuing despite unresolved recovery for this folder."
+        )
+        return True
 
     def _cancel(self) -> None:
-        if self.worker is not None and self.worker.is_alive():
-            self.cancel_event.set()
+        if self.jobs.active:
+            self.jobs.cancel()
+            self._append_activity_log("Cancellation requested.")
             self.status_var.set("Cancellation requested…")
 
     def _undo_latest(self) -> None:
@@ -595,18 +869,9 @@ class SongOrganizerApp:
             f"Restore the latest batch for {batch.get('root', 'the selected folder')}?",
         ):
             return
-        self.cancel_event = threading.Event()
+        self._append_activity_log("Restoring the latest batch.")
         self._set_busy(True)
-
-        def worker() -> None:
-            try:
-                results = undo_batch(batch["batch_id"])
-                self.events.put(("undo-complete", results))
-            except Exception as exc:  # pylint: disable=broad-exception-caught
-                self.events.put(("failed", str(exc)))
-
-        self.worker = threading.Thread(target=worker, daemon=True)
-        self.worker.start()
+        self.jobs.undo(batch["batch_id"])
 
     def _show_history(self) -> None:
         batches = batch_history()
@@ -642,32 +907,79 @@ class SongOrganizerApp:
         kind = event[0]
         if kind == "progress":
             _, stage, current, total, path = event
-            self.status_var.set(f"{stage}: {current}/{total}  {path}")
-        elif kind == "analysis-complete":
-            self.plan = event[1]
+            progress_message = _format_progress_log(stage, current, total, path)
+            self._append_activity_log(progress_message)
+            self.status_var.set(progress_message)
+        elif kind == "organize-complete":
+            self.plan, results = event[1], event[2]
             self._set_busy(False)
             self._populate_plan(self.plan)
-            self.status_var.set(
-                f"Analysis complete: {len(self.plan.rename_proposals)} renames, "
-                f"{len(self.plan.tag_proposals)} tag repairs, "
-                f"{len(self.plan.duplicate_findings)} duplicate findings."
+            self._record_applied_groups(results)
+            actions = _action_items(self.plan)
+            unresolved = len(self.plan.issues) + sum(
+                _requires_review(item)
+                for item in actions
             )
+            if not actions and self.plan.issues:
+                self.notebook.select(self.trees["errors"].master)
+                self.status_var.set(
+                    f"No proposed changes found; {len(self.plan.issues)} "
+                    "file(s) failed analysis."
+                )
+                self._append_activity_log(
+                    f"Analysis complete: no proposed changes; "
+                    f"{len(self.plan.issues)} file(s) failed analysis."
+                )
+                messagebox.showwarning(
+                    "No songs were organized",
+                    "Ballad could not produce a metadata or filename change "
+                    "to review. Open Skipped / errors for the causes.",
+                )
+                return
+            recommended = len(_recommended_ids(self.plan))
+            song_count = len(_grouped_action_ids(self.plan))
+            duplicate_summary = (
+                f"{len(self.plan.duplicate_findings)} duplicate findings."
+                if self._last_run_checked_duplicates
+                else "duplicate check skipped."
+            )
+            summary = (
+                f"Analysis complete: {len(actions)} proposed change(s) across "
+                f"{song_count} song(s), {recommended} high-confidence and "
+                f"recommended, {unresolved} item(s) need review, "
+                f"{duplicate_summary} "
+                "Nothing has changed yet \u2014 select changes and click "
+                "'Apply selected'."
+            )
+            self.status_var.set(summary)
+            self._append_activity_log(summary)
         elif kind == "undo-complete":
             results = event[1]
             self._set_busy(False)
             succeeded = sum(result.status == "succeeded" for result in results)
-            failed = sum(result.status == "failed" for result in results)
-            self.status_var.set(
-                f"Undo complete: {succeeded} restored, {failed} failed."
+            failures = [result for result in results if result.status == "failed"]
+            summary = (
+                f"Undo complete: {succeeded} restored, {len(failures)} failed."
             )
-            if failed:
+            self.status_var.set(summary)
+            self._append_activity_log(summary)
+            if failures:
+                details = "\n".join(
+                    f"\u2022 {Path(result.path).name}: {result.message}"
+                    for result in failures[:10]
+                )
+                if len(failures) > 10:
+                    details += f"\n\u2026 and {len(failures) - 10} more."
                 messagebox.showwarning(
                     "Undo needs attention",
-                    f"{failed} action(s) could not be restored. "
-                    "Review the batch journal.",
+                    f"{len(failures)} action(s) could not be restored:\n\n"
+                    f"{details}\n\n"
+                    "This is often a transient file lock (e.g. antivirus "
+                    "scanning); click 'Undo latest' again to retry.",
                 )
         elif kind == "apply-complete":
             results = event[1]
+            self._record_applied_groups(results)
             self._set_busy(False)
             succeeded = sum(result.status == "succeeded" for result in results)
             blocked = sum(result.status == "blocked" for result in results)
@@ -682,10 +994,12 @@ class SongOrganizerApp:
                         result.message,
                         "error",
                     )
-            self.status_var.set(
+            summary = (
                 f"Apply complete: {succeeded} succeeded, "
                 f"{blocked} blocked, {failed} failed."
             )
+            self.status_var.set(summary)
+            self._append_activity_log(summary)
             if failed or blocked:
                 messagebox.showwarning(
                     "Apply finished with issues",
@@ -703,47 +1017,63 @@ class SongOrganizerApp:
         elif kind == "failed":
             self._set_busy(False)
             self.status_var.set("Operation failed.")
+            self._append_activity_log(f"Operation failed: {event[1]}")
             messagebox.showerror("Operation failed", event[1])
 
     def _clear_trees(self) -> None:
-        for tree in self.trees.values():
+        tree_headings = getattr(self, "_tree_headings", {})
+        for tree_name, tree in self.trees.items():
             tree.delete(*tree.get_children())
+            for column, label in tree_headings.get(tree_name, {}).items():
+                tree.heading(column, text=label)
         self._row_ids.clear()
         self._row_paths.clear()
+        getattr(self, "_sort_state", {}).clear()
+        getattr(self, "_selection_anchors", {}).clear()
+
+    def _sort_tree_column(self, tree_name: str, column: str) -> None:
+        """Reorder one tree's rows by a column's text; repeat clicks reverse it.
+
+        Uses `move` rather than delete-and-reinsert so `_row_ids`/`_row_paths`
+        (keyed by item id) stay valid without needing to be rebuilt.
+        """
+        tree = self.trees[tree_name]
+        reverse = self._sort_state.get((tree_name, column), False)
+        children = sorted(
+            tree.get_children(""),
+            key=lambda iid: tree.set(iid, column).casefold(),
+            reverse=reverse,
+        )
+        for index, iid in enumerate(children):
+            tree.move(iid, "", index)
+        self._sort_state[(tree_name, column)] = not reverse
+        arrow = "\u25bc" if reverse else "\u25b2"
+        for other_column, label in self._tree_headings.get(tree_name, {}).items():
+            text = f"{label} {arrow}" if other_column == column else label
+            tree.heading(other_column, text=text)
 
     def _populate_plan(self, plan: ReviewPlan) -> None:
         self._clear_trees()
-        for item in plan.rename_proposals:
-            self._insert_change_row(
-                "renames",
-                item.id,
-                _action_label(item, "Rename"),
-                item.old_path,
-                item.current_values.get("filename", ""),
-                item.proposed_values.get("filename", ""),
-                "review" if _requires_review(item) else item.confidence,
-            )
-        for item in plan.tag_proposals:
-            self._insert_change_row(
-                "tags",
-                item.id,
-                _action_label(item, "Tag repair"),
-                item.path,
-                _tag_display(item.before),
-                _tag_display(item.after),
-                "review" if _requires_review(item) else item.confidence,
-            )
-        for item in plan.duplicate_findings:
-            self._insert_duplicate_finding(item)
-        for issue in plan.issues:
-            self._insert_row(
-                "errors",
-                f"issue-{len(self._row_ids)}",
-                issue.get("category", "error"),
-                issue.get("path", ""),
-                issue.get("message", ""),
-                "warning",
-            )
+        for row in plan_rows(plan):
+            if row.is_change:
+                self._insert_change_row(
+                    row.tree,
+                    row.item_id,
+                    row.action,
+                    row.path,
+                    row.current,
+                    row.proposed,
+                    row.confidence,
+                )
+            else:
+                self._insert_row(
+                    row.tree,
+                    row.item_id,
+                    row.action,
+                    row.path,
+                    row.current,
+                    row.confidence,
+                )
 
     def _insert_duplicate_finding(self, item) -> None:
         paths = item.paths or ("",)
@@ -773,6 +1103,7 @@ class SongOrganizerApp:
             "",
             tk.END,
             values=(action, display_file, summary, confidence),
+            tags=_confidence_row_tags(confidence),
         )
         self._row_ids[(tree_name, row)] = item_id
         self._row_paths[(tree_name, row)] = path
@@ -792,7 +1123,12 @@ class SongOrganizerApp:
         if tree_name == "tags":
             values.append(Path(path).name if path else "")
         values.extend((current, proposed, confidence))
-        row = tree.insert("", tk.END, values=values)
+        row = tree.insert(
+            "",
+            tk.END,
+            values=values,
+            tags=_confidence_row_tags(confidence),
+        )
         self._row_ids[(tree_name, row)] = item_id
         self._row_paths[(tree_name, row)] = path
 
@@ -809,11 +1145,30 @@ class SongOrganizerApp:
 
         menu = tk.Menu(self.root, tearoff=False)
         menu.add_command(
+            label="Play",
+            command=lambda: self._open_with_default_app(path),
+        )
+        menu.add_command(
             label="Open in File Explorer",
             command=lambda: self._open_in_file_explorer(path),
         )
+        row_ids = getattr(self, "_row_ids", {})
+        proposal = self._proposal_for_id(row_ids.get((tree_name, row), ""))
+        if tree_name == "tags" and proposal is not None and proposal.evidence:
+            menu.add_separator()
+            menu.add_command(
+                label="Show metadata evidence",
+                command=lambda: self._show_metadata_evidence(proposal),
+            )
         menu.tk_popup(event.x_root, event.y_root)
         return "break"
+
+    def _show_metadata_evidence(self, proposal) -> None:
+        """Show the source IDs used to prepare an enrichment proposal."""
+        messagebox.showinfo(
+            "Metadata evidence",
+            json.dumps(proposal.evidence.to_dict(), indent=2, ensure_ascii=False),
+        )
 
     def _open_in_file_explorer(self, path: str) -> None:
         target = Path(path)
@@ -839,6 +1194,29 @@ class SongOrganizerApp:
                 str(exc),
             )
 
+    def _open_with_default_app(self, path: str) -> None:
+        """Launch a row's audio file in whatever program handles it by default.
+
+        This mirrors double-clicking the file in a file manager. Bound to
+        double-click rather than single-click because single-click already
+        toggles the row's checkbox; firing a media player on every click
+        while multi-selecting rows to review would be disruptive.
+        """
+        target = Path(path)
+        if not target.is_file():
+            messagebox.showwarning(
+                "File unavailable",
+                f"This file is no longer available:\n{target}",
+            )
+            return
+        try:
+            if os.name == "nt":
+                os.startfile(str(target))  # noqa: S606
+            else:
+                subprocess.Popen(["xdg-open", str(target)])
+        except OSError as exc:
+            messagebox.showerror("Could not open file", str(exc))
+
     def _proposal_for_id(self, item_id: str):
         plan = getattr(self, "plan", None)
         if plan is None:
@@ -848,6 +1226,28 @@ class SongOrganizerApp:
             None,
         )
 
+    def _record_applied_groups(self, results) -> None:
+        if self.plan is None:
+            return
+        successful_ids = {
+            result.proposal_id
+            for result in results
+            if result.status == "succeeded"
+        }
+        self._applied_group_ids.update(
+            item.decision_group_id
+            for item in _action_items(self.plan)
+            if item.id in successful_ids
+        )
+        self._set_selected_ids(self.selected_ids)
+
+    def _group_was_applied(self, proposal) -> bool:
+        return proposal.decision_group_id in getattr(
+            self,
+            "_applied_group_ids",
+            set(),
+        )
+
     def _selection_group_count(self) -> int:
         plan = getattr(self, "plan", None)
         if plan is None:
@@ -855,9 +1255,24 @@ class SongOrganizerApp:
         groups = _grouped_action_ids(plan)
         return sum(bool(self.selected_ids & item_ids) for item_ids in groups.values())
 
-    def _update_apply_button(self) -> None:
-        button = getattr(self, "apply_button", None)
+    def _update_primary_button(self) -> None:
+        """Keep the one prominent call-to-action mapped to the current step.
+
+        Before a plan exists, this button *is* "Organize library" rather
+        than a separate, easy-to-miss button elsewhere. Once a plan is
+        loaded, the same button becomes "Apply selected", so there's always
+        exactly one obvious next action instead of splitting attention
+        between a subdued button and a prominent one that starts out inert.
+        """
+        button = getattr(self, "primary_button", None)
         if button is None:
+            return
+        if self.plan is None:
+            button.configure(
+                text="Organize library",
+                command=self._organize_library,
+                state=tk.NORMAL,
+            )
             return
         group_count = self._selection_group_count()
         button.configure(
@@ -866,11 +1281,30 @@ class SongOrganizerApp:
                 if group_count
                 else "Apply selected"
             ),
+            command=self._apply,
             state=tk.NORMAL if group_count else tk.DISABLED,
         )
 
+    def _handle_tree_double_click(self, tree_name: str, event):
+        tree = self.trees[tree_name]
+        if tree.identify_region(event.x, event.y) != "cell":
+            return None
+        # The first column is the checkbox. Double-clicking it means "I
+        # clicked the box twice", not "play this"; launching a media player
+        # from the same target the user aims at to select rows is jarring.
+        if tree.identify_column(event.x) == "#1" and tree_name in {"renames", "tags"}:
+            return "break"
+        row = tree.identify_row(event.y)
+        if not row:
+            return None
+        path = self._row_paths.get((tree_name, row))
+        if path:
+            self._open_with_default_app(path)
+        return None
+
     def _handle_tree_click(self, tree_name: str, event):
         tree = self.trees[tree_name]
+        self._selection_anchors = getattr(self, "_selection_anchors", {})
         if tree.identify_region(event.x, event.y) == "separator":
             column = tree.identify_column(event.x)
             index = int(column[1:]) - 1 if column.startswith("#") else -1
@@ -887,13 +1321,29 @@ class SongOrganizerApp:
                 return "break"
         if tree_name not in {"renames", "tags"}:
             return None
-        if tree.identify_column(event.x) != "#1":
-            return None
+        column = tree.identify_column(event.x)
         row = tree.identify_row(event.y)
         if not row:
-            return "break"
+            return None if column != "#1" else "break"
+        shift_pressed = bool(getattr(event, "state", 0) & _SHIFT_MASK)
+        if column != "#1":
+            if not shift_pressed:
+                self._selection_anchors[tree_name] = row
+            elif tree_name not in self._selection_anchors:
+                self._selection_anchors[tree_name] = row
+            return None
 
         rows = list(tree.selection())
+        if shift_pressed:
+            anchor = self._selection_anchors.get(tree_name)
+            visible_rows = list(tree.get_children(""))
+            if anchor in visible_rows and row in visible_rows:
+                start = visible_rows.index(anchor)
+                end = visible_rows.index(row)
+                rows = visible_rows[min(start, end) : max(start, end) + 1]
+                tree.selection_set(rows)
+        else:
+            self._selection_anchors[tree_name] = row
         if row not in rows:
             tree.selection_set(row)
             rows = [row]
@@ -912,9 +1362,16 @@ class SongOrganizerApp:
             else:
                 self._set_selected_ids(self.selected_ids | item_ids)
             return "break"
-        if _requires_review(clicked):
+        if self._group_was_applied(clicked):
             self.status_var.set(
-                "Resolve this destination conflict before selecting the song."
+                "This song was already changed in this run. Organize again "
+                "before making more changes."
+            )
+            return "break"
+        if not clicked.apply_eligible:
+            self.status_var.set(
+                "This song has a blocking issue and cannot be selected until "
+                "it is resolved."
             )
             return "break"
         groups = _grouped_action_ids(self.plan)
@@ -922,7 +1379,8 @@ class SongOrganizerApp:
             proposal.decision_group_id
             for item_id in item_ids
             if (proposal := self._proposal_for_id(item_id)) is not None
-            and not _requires_review(proposal)
+            and proposal.apply_eligible
+            and not self._group_was_applied(proposal)
         }
         grouped_ids = {
             item_id
@@ -957,7 +1415,10 @@ class SongOrganizerApp:
 
     def _edit_selected_filename(self) -> None:
         if self.plan is None:
-            messagebox.showinfo("Nothing to edit", "Analyze a folder first.")
+            messagebox.showinfo(
+                "Nothing to edit",
+                "Organize a library first.",
+            )
             return
         tree = self.trees["renames"]
         rows = tree.selection()
@@ -979,6 +1440,12 @@ class SongOrganizerApp:
         )
         if proposal is None:
             messagebox.showerror("Rename unavailable", "That rename is no longer available.")
+            return
+        if self._group_was_applied(proposal):
+            messagebox.showinfo(
+                "Rename already applied",
+                "Organize the library again before editing this song.",
+            )
             return
 
         filename = _ask_filename(
@@ -1044,11 +1511,25 @@ class SongOrganizerApp:
 
     def _set_selected_ids(self, selected_ids) -> None:
         plan = getattr(self, "plan", None)
-        self.selected_ids = (
-            _expand_group_selection(plan, selected_ids)
+        selected = (
+            _expand_group_selection(
+                plan,
+                selected_ids,
+                include_review=True,
+            )
             if plan is not None
             else set(selected_ids)
         )
+        if plan is not None:
+            groups = _grouped_action_ids(plan)
+            selected = {
+                item_id
+                for group_id, item_ids in groups.items()
+                if group_id not in getattr(self, "_applied_group_ids", set())
+                for item_id in item_ids
+                if item_id in selected
+            }
+        self.selected_ids = selected
         for tree_name in ("renames", "tags"):
             tree = self.trees[tree_name]
             for row in tree.get_children(""):
@@ -1061,15 +1542,15 @@ class SongOrganizerApp:
                         else "☐"
                     )
                     tree.item(row, values=values)
-        self._update_apply_button()
+        self._update_primary_button()
 
     def _close(self) -> None:
-        if self.worker is not None and self.worker.is_alive():
+        if self.jobs.active:
             if not messagebox.askyesno(
                 "Cancel operation", "Request cancellation and close the application?"
             ):
                 return
-            self.cancel_event.set()
+            self.jobs.cancel()
             self.root.after(100, self._close)
             return
         self._release_windows_icon_handles()

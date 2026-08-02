@@ -11,11 +11,15 @@ from renamer.apply import apply_review_plan
 from renamer.extractor import scan_folder
 from renamer.review_api import plan_renames
 from renamer.review_models import ReviewPlan
+from renamer.selection import eligible_ids
 
 
 def _selected_ids(proposals, interactive: bool, output: Output) -> list[str]:
+    eligible = set(eligible_ids(proposals, include_review=interactive))
     selected = []
     for item in proposals:
+        if item.id not in eligible:
+            continue
         if interactive and not output.confirm(
             f"\n{item.old_path}\n→ {item.new_path}\nApply? [Y/n] "
         ):

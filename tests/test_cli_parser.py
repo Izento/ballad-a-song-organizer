@@ -29,6 +29,11 @@ def test_rename_options_are_scoped_to_rename_command():
     assert args.apply is True
 
 
+def test_enrich_defaults_to_cover_art_and_can_skip_it():
+    assert parse_args(["enrich"]).cover_art is True
+    assert parse_args(["enrich", "--no-cover-art"]).cover_art is False
+
+
 @pytest.mark.parametrize(
     "legacy_option",
     [
