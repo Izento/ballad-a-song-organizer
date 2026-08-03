@@ -820,11 +820,9 @@ def batch_history() -> list[dict]:
 
 
 __all__ = [
-    "ApplyBlocked",
     "apply_review_plan",
     "batch_history",
     "batches_requiring_recovery",
-    "incomplete_batches",
     "latest_undoable_batch",
     "read_batch",
     "undo_batch",

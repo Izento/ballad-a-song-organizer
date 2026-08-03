@@ -109,7 +109,6 @@ def unquarantine_files(path_keys: set[str] | list[str]) -> int:
 
 
 __all__ = [
-    "file_id_for_path",
     "is_quarantined",
     "load_quarantine",
     "quarantine_file",

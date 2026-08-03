@@ -544,9 +544,10 @@ def test_select_missing_artwork_includes_medium_confidence_proposals(tmp_path):
     assert app.status_var.value == "Selected 1 verified cover-art change(s)."
 
 
-def test_duplicate_finding_renders_each_path():
+def test_populate_plan_renders_each_duplicate_path(tmp_path):
     app = SongOrganizerApp.__new__(SongOrganizerApp)
     rendered = []
+    app._clear_trees = lambda: None
     app._insert_row = lambda *values: rendered.append(values)
     finding = DuplicateFinding(
         id="duplicate-1",
@@ -557,7 +558,13 @@ def test_duplicate_finding_renders_each_path():
         confidence="low",
     )
 
-    app._insert_duplicate_finding(finding)
+    app._populate_plan(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            duplicate_findings=[finding],
+        )
+    )
 
     assert rendered == [
         (

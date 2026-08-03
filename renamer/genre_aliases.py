@@ -38,4 +38,4 @@ def normalize_genre_list(values: list[str]) -> list[str]:
     return result
 
 
-__all__ = ["GENRE_ALIASES", "normalize_genre", "normalize_genre_list"]
+__all__ = ["normalize_genre", "normalize_genre_list"]

@@ -257,7 +257,6 @@ class SongOrganizerApp:
         self._sort_state: dict[tuple[str, str], bool] = {}
         self._selection_anchors: dict[str, str] = {}
         self.activity_container: ttk.Frame
-        self.activity_panel: ttk.Labelframe
         self.activity_log: tk.Text
         self.activity_show_button: ttk.Button
         self._recovery_overrides: set[str] = set()
@@ -1293,9 +1292,6 @@ class SongOrganizerApp:
                     proposals.append(item)
         return proposals
 
-    def _quarantine_proposal(self, proposal) -> None:
-        self._quarantine_proposals([proposal])
-
     def _quarantine_proposals(self, proposals: list[Any]) -> None:
         if not proposals:
             return
@@ -1756,19 +1752,6 @@ class SongOrganizerApp:
                     row.current,
                     row.confidence,
                 )
-
-    def _insert_duplicate_finding(self, item) -> None:
-        paths = item.paths or ("",)
-        total = len(paths)
-        for index, path in enumerate(paths, start=1):
-            self._insert_row(
-                "duplicates",
-                f"{item.id}:{index}",
-                f"{item.classification} ({index}/{total})",
-                path,
-                item.recommendation,
-                item.confidence,
-            )
 
     def _insert_row(
         self,

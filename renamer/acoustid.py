@@ -255,11 +255,6 @@ def lookup(path: str, api_key: str) -> dict | None:
     return result
 
 
-def is_fpcalc_available() -> bool:
-    """Quick check: is the bundled or PATH fpcalc reachable?"""
-    return resolve_fpcalc() is not None
-
-
 def _parse_result(
     artist: str,
     title: str,

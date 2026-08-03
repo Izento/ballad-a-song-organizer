@@ -194,7 +194,6 @@ __all__ = [
     "IssueSeverity",
     "ReviewIssue",
     "apply_eligible",
-    "issue_code_for_message",
     "proposal_issues",
     "requires_review",
 ]

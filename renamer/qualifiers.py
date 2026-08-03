@@ -162,11 +162,6 @@ def parse_qualifiers(value: str) -> tuple[Qualifier, ...]:
     return tuple(qualifiers)
 
 
-def has_explicit_derivative(value: str) -> bool:
-    """Whether a filename claims an alternate recording/version."""
-    return any(item.is_derivative for item in parse_qualifiers(value))
-
-
 def has_explicit_variant(value: str) -> bool:
     """Whether a filename explicitly identifies a non-base recording version."""
     return any(item.is_recording_identity for item in parse_qualifiers(value))
@@ -277,7 +272,6 @@ def preserve_local_versions(local_title: str, online_title: str) -> str:
 
 __all__ = [
     "Qualifier",
-    "has_explicit_derivative",
     "has_explicit_variant",
     "has_instrumental_qualifier",
     "has_matching_qualifier",
