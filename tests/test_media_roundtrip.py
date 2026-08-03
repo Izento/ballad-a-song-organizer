@@ -4,8 +4,9 @@ import shutil
 from pathlib import Path
 
 import pytest
+from mutagen.id3 import ID3
 
-from renamer.media import read_media, write_tags_to_file
+from renamer.media import read_media, write_tags_to_file, writer
 
 FIXTURES = Path(__file__).parent / "fixtures"
 FORMATS = ("mp3", "flac", "ogg", "m4a", "wma")
@@ -111,3 +112,35 @@ def test_supported_container_round_trips_front_artwork(
     assert media.artwork is not None
     assert media.artwork["sha256"] == artwork["sha256"]
     assert media.artwork["size"] == artwork["size"]
+
+
+def test_mp3_writer_embeds_rich_tags_and_front_art(tmp_path):
+    path = tmp_path / "track.mp3"
+    path.write_bytes(b"")
+    artwork = tmp_path / "cover.jpg"
+    artwork.write_bytes(b"\xff\xd8\xffcover")
+
+    writer._write_mp3(
+        str(path),
+        {
+            "artist": "Artist",
+            "title": "Title",
+            "tracknumber": "2",
+            "genre": ["Electronic", "House"],
+            "musicbrainz_recordingid": "recording-id",
+        },
+        {
+            "path": str(artwork),
+            "mime_type": "image/jpeg",
+        },
+    )
+
+    tags = ID3(path)
+    assert tags["TPE1"].text == ["Artist"]
+    assert tags["TRCK"].text == ["2"]
+    # ID3v2.3 has no native multi-value text support, so multi-value fields
+    # are joined with "; " on write (chosen because it won't collide with
+    # real tag/credit text the way "/" can -- e.g. the genre "hip-hop/rap").
+    assert tags["TCON"].text == ["Electronic; House"]
+    assert tags["TXXX:MUSICBRAINZ_RECORDINGID"].text == ["recording-id"]
+    assert tags.getall("APIC")[0].data == b"\xff\xd8\xffcover"

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 from renamer import apply as apply_module
@@ -16,24 +17,13 @@ from renamer.review_models import (
 )
 
 
-def _test_app_paths(root: Path):
-    paths = {
-        "root": root,
-        "config": root / "config.yaml",
-        "cache": root / "Cache",
-        "backups": root / "Backups",
-        "journals": root / "Journals",
-        "logs": root / "Logs",
-    }
-    for key, path in paths.items():
-        if key != "config":
-            path.mkdir(parents=True, exist_ok=True)
-    return paths
-
-
-def test_recovery_queries_can_be_scoped_to_review_root(tmp_path, monkeypatch):
+def test_recovery_queries_can_be_scoped_to_review_root(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     state = tmp_path / "state"
-    paths = _test_app_paths(state)
+    paths = app_paths(state)
     monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: paths)
     first_root = tmp_path / "first-music"
     second_root = tmp_path / "second-music"
@@ -65,12 +55,12 @@ def test_recovery_queries_can_be_scoped_to_review_root(tmp_path, monkeypatch):
     )
 
 
-def test_apply_uses_reviewed_rename_and_undo(tmp_path, monkeypatch):
+def test_apply_uses_reviewed_rename_and_undo(tmp_path, monkeypatch, app_paths):
     source = tmp_path / "old.mp3"
     destination = tmp_path / "new.mp3"
     source.write_bytes(b"audio")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
     snapshot = FileSnapshot.capture(str(source))
@@ -101,12 +91,12 @@ def test_apply_uses_reviewed_rename_and_undo(tmp_path, monkeypatch):
     assert apply_module.latest_undoable_batch() is None
 
 
-def test_tag_apply_restores_backup(tmp_path, monkeypatch):
+def test_tag_apply_restores_backup(tmp_path, monkeypatch, app_paths):
     source = tmp_path / "Artist - Song.mp3"
     source.write_bytes(b"audio")
     state = tmp_path / "state"
     monkeypatch.setattr(apply_module, "ensure_app_dirs",
-                        lambda: _test_app_paths(state))
+                        lambda: app_paths(state))
     written = []
     monkeypatch.setattr(
         apply_module,
@@ -151,13 +141,13 @@ def test_tag_apply_restores_backup(tmp_path, monkeypatch):
     assert backup["before"] == {"artist": "Wrong", "title": "Wrong"}
 
 
-def test_apply_rejects_existing_unrelated_destination(tmp_path, monkeypatch):
+def test_apply_rejects_existing_unrelated_destination(tmp_path, monkeypatch, app_paths):
     source = tmp_path / "old.mp3"
     destination = tmp_path / "new.mp3"
     source.write_bytes(b"source")
     destination.write_bytes(b"unrelated")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
     proposal = RenameProposal(
@@ -180,11 +170,15 @@ def test_apply_rejects_existing_unrelated_destination(tmp_path, monkeypatch):
     assert destination.read_bytes() == b"unrelated"
 
 
-def test_apply_writes_reviewed_tags_for_nonstandard_filename(tmp_path, monkeypatch):
+def test_apply_writes_reviewed_tags_for_nonstandard_filename(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     source = tmp_path / "NoArtistTitle.mp3"
     source.write_bytes(b"source")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
     monkeypatch.setattr(
@@ -220,11 +214,15 @@ def test_apply_writes_reviewed_tags_for_nonstandard_filename(tmp_path, monkeypat
     assert source.read_bytes() == b"source"
 
 
-def test_apply_preflights_unsupported_tag_file_type(tmp_path, monkeypatch):
+def test_apply_preflights_unsupported_tag_file_type(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     source = tmp_path / "Artist - Song.wav"
     source.write_bytes(b"source")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
     proposal = TagProposal(
@@ -246,13 +244,17 @@ def test_apply_preflights_unsupported_tag_file_type(tmp_path, monkeypatch):
     assert source.read_bytes() == b"source"
 
 
-def test_apply_continues_after_failed_tag_write(tmp_path, monkeypatch):
+def test_apply_continues_after_failed_tag_write(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     failed_source = tmp_path / "Artist - Failed.mp3"
     safe_source = tmp_path / "Artist - Safe.mp3"
     failed_source.write_bytes(b"failed")
     safe_source.write_bytes(b"safe")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
 
@@ -298,7 +300,11 @@ def test_apply_continues_after_failed_tag_write(tmp_path, monkeypatch):
     assert [result.status for result in results] == ["failed", "succeeded"]
 
 
-def test_apply_continues_after_unrelated_destination_block(tmp_path, monkeypatch):
+def test_apply_continues_after_unrelated_destination_block(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     safe_source = tmp_path / "safe-source.mp3"
     safe_destination = tmp_path / "safe-destination.mp3"
     blocked_source = tmp_path / "blocked-source.mp3"
@@ -307,7 +313,7 @@ def test_apply_continues_after_unrelated_destination_block(tmp_path, monkeypatch
     blocked_source.write_bytes(b"blocked")
     blocked_destination.write_bytes(b"existing")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
 
@@ -351,12 +357,16 @@ def test_apply_continues_after_unrelated_destination_block(tmp_path, monkeypatch
     assert apply_module.batches_requiring_recovery() == []
 
 
-def test_apply_preflight_blocks_unknown_artist_filename(tmp_path, monkeypatch):
+def test_apply_preflight_blocks_unknown_artist_filename(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     source = tmp_path / "Known Artist - Song.mp3"
     destination = tmp_path / "Unknown Artist - Song.mp3"
     source.write_bytes(b"audio")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
     proposal = RenameProposal(
@@ -384,11 +394,11 @@ def test_apply_preflight_blocks_unknown_artist_filename(tmp_path, monkeypatch):
     assert not destination.exists()
 
 
-def test_undo_restores_compact_tag_snapshot(tmp_path, monkeypatch):
+def test_undo_restores_compact_tag_snapshot(tmp_path, monkeypatch, app_paths):
     source = tmp_path / "Artist - Song.mp3"
     source.write_bytes(b"post-write")
     state = tmp_path / "state"
-    paths = _test_app_paths(state)
+    paths = app_paths(state)
     monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: paths)
     backup = paths["backups"] / "batch" / "tag.metadata.json"
     backup.parent.mkdir(parents=True)
@@ -448,13 +458,13 @@ def test_undo_restores_compact_tag_snapshot(tmp_path, monkeypatch):
     }
 
 
-def test_undo_discards_interrupted_tag_temporary_file(tmp_path, monkeypatch):
+def test_undo_discards_interrupted_tag_temporary_file(tmp_path, monkeypatch, app_paths):
     source = tmp_path / "Artist - Song.mp3"
     source.write_bytes(b"original")
     temporary = tmp_path / ".songorganizer-batch-tag.mp3"
     temporary.write_bytes(b"temporary")
     state = tmp_path / "state"
-    paths = _test_app_paths(state)
+    paths = app_paths(state)
     monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: paths)
     backup = paths["backups"] / "batch" / "tag.metadata.json"
     backup.parent.mkdir(parents=True)
@@ -486,7 +496,11 @@ def test_undo_discards_interrupted_tag_temporary_file(tmp_path, monkeypatch):
     assert source.read_bytes() == b"original"
 
 
-def test_undo_restores_original_front_artwork_bytes(tmp_path, monkeypatch):
+def test_undo_restores_original_front_artwork_bytes(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     fixtures = Path(__file__).parent / "fixtures"
     source = tmp_path / "Artist - Song.mp3"
     shutil.copy2(fixtures / "sample.mp3", source)
@@ -533,7 +547,7 @@ def test_undo_restores_original_front_artwork_bytes(tmp_path, monkeypatch):
     monkeypatch.setattr(
         apply_module,
         "ensure_app_dirs",
-        lambda: _test_app_paths(tmp_path / "state"),
+        lambda: app_paths(tmp_path / "state"),
     )
 
     applied = apply_module.apply_review_plan(plan, [proposal.id])
@@ -546,7 +560,11 @@ def test_undo_restores_original_front_artwork_bytes(tmp_path, monkeypatch):
     assert read_media(str(source)).artwork.sha256 == original_art["sha256"]
 
 
-def test_undo_removes_artwork_when_original_had_none(tmp_path, monkeypatch):
+def test_undo_removes_artwork_when_original_had_none(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     fixtures = Path(__file__).parent / "fixtures"
     source = tmp_path / "Artist - Song.mp3"
     shutil.copy2(fixtures / "sample.mp3", source)
@@ -589,7 +607,7 @@ def test_undo_removes_artwork_when_original_had_none(tmp_path, monkeypatch):
     monkeypatch.setattr(
         apply_module,
         "ensure_app_dirs",
-        lambda: _test_app_paths(tmp_path / "state"),
+        lambda: app_paths(tmp_path / "state"),
     )
 
     applied = apply_module.apply_review_plan(plan, [proposal.id])
@@ -632,12 +650,16 @@ def test_review_plan_round_trips_and_rejects_tampering(tmp_path):
         raise AssertionError("Tampered review plan was accepted")
 
 
-def test_undo_is_idempotent_after_successful_restore(tmp_path, monkeypatch):
+def test_undo_is_idempotent_after_successful_restore(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
     source = tmp_path / "old.mp3"
     destination = tmp_path / "new.mp3"
     source.write_bytes(b"audio")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
     proposal = RenameProposal(
@@ -662,7 +684,7 @@ def test_undo_is_idempotent_after_successful_restore(tmp_path, monkeypatch):
     assert source.read_bytes() == b"audio"
 
 
-def test_targeted_undo_batch(tmp_path, monkeypatch):
+def test_targeted_undo_batch(tmp_path, monkeypatch, app_paths):
     source1 = tmp_path / "song1.mp3"
     dest1 = tmp_path / "renamed1.mp3"
     source2 = tmp_path / "song2.mp3"
@@ -670,7 +692,7 @@ def test_targeted_undo_batch(tmp_path, monkeypatch):
     source1.write_bytes(b"audio1")
     source2.write_bytes(b"audio2")
     monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: _test_app_paths(
+        apply_module, "ensure_app_dirs", lambda: app_paths(
             tmp_path / "state")
     )
     p1 = RenameProposal(
@@ -721,3 +743,161 @@ def test_targeted_undo_batch(tmp_path, monkeypatch):
 
     batch_info2 = apply_module.read_batch(plan.batch_id)
     assert batch_info2["status"] == "undone"
+
+
+def _coordinated_plan(tmp_path: Path) -> tuple[ReviewPlan, TagProposal, RenameProposal]:
+    source = tmp_path / "old.mp3"
+    source.write_bytes(b"audio")
+    snapshot = FileSnapshot.capture(
+        str(source),
+        tags={"artist": "Old", "title": "Title"},
+        include_hash=True,
+    )
+    tag = TagProposal(
+        id="tag",
+        decision_group_id="song",
+        snapshot=snapshot,
+        path=str(source),
+        before={"artist": "Old", "title": "Title"},
+        after={"artist": "New", "title": "Title"},
+        confidence="high",
+        reason="test",
+    )
+    rename = RenameProposal(
+        id="rename",
+        decision_group_id="song",
+        snapshot=snapshot,
+        old_path=str(source),
+        new_path=str(tmp_path / "new.mp3"),
+        current_values={"filename": source.name},
+        proposed_values={"filename": "new.mp3"},
+        confidence="high",
+        reason="test",
+    )
+    return (
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[rename],
+            tag_proposals=[tag],
+        ),
+        tag,
+        rename,
+    )
+
+
+def test_apply_rejects_invalid_plan_digest_before_mutation(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
+    plan, _tag, rename = _coordinated_plan(tmp_path)
+    monkeypatch.setattr(
+        apply_module,
+        "ensure_app_dirs",
+        lambda: app_paths(tmp_path / "state"),
+    )
+
+    results = apply_module.apply_review_plan(
+        replace(plan, digest="tampered"),
+        [rename.id],
+    )
+
+    assert results[0].status == "blocked"
+    assert Path(rename.old_path).is_file()
+    assert not Path(rename.new_path).exists()
+
+
+def test_failed_tag_prevents_same_song_rename(tmp_path, monkeypatch, app_paths):
+    plan, tag, rename = _coordinated_plan(tmp_path)
+    monkeypatch.setattr(
+        apply_module,
+        "ensure_app_dirs",
+        lambda: app_paths(tmp_path / "state"),
+    )
+    monkeypatch.setattr(
+        apply_module,
+        "_apply_tag",
+        lambda item, _journal: ApplyResult(
+            proposal_id=item.id,
+            status="failed",
+            path=item.path,
+            message="injected failure",
+        ),
+    )
+
+    results = apply_module.apply_review_plan(plan, [tag.id, rename.id])
+    statuses = {result.proposal_id: result.status for result in results}
+
+    assert statuses == {"tag": "failed", "rename": "blocked"}
+    assert Path(rename.old_path).is_file()
+    assert not Path(rename.new_path).exists()
+
+
+def test_tag_failure_does_not_block_unrelated_song(tmp_path, monkeypatch, app_paths):
+    proposals = []
+    for group in ("first", "second"):
+        source = tmp_path / f"{group}-old.mp3"
+        source.write_bytes(b"audio")
+        snapshot = FileSnapshot.capture(
+            str(source),
+            tags={"artist": "Old", "title": group},
+            include_hash=True,
+        )
+        proposals.append(
+            (
+                TagProposal(
+                    id=f"{group}-tag",
+                    decision_group_id=group,
+                    snapshot=snapshot,
+                    path=str(source),
+                    before={"artist": "Old", "title": group},
+                    after={"artist": "New", "title": group},
+                    confidence="high",
+                    reason="test",
+                ),
+                RenameProposal(
+                    id=f"{group}-rename",
+                    decision_group_id=group,
+                    snapshot=snapshot,
+                    old_path=str(source),
+                    new_path=str(tmp_path / f"{group}-new.mp3"),
+                    current_values={"filename": source.name},
+                    proposed_values={"filename": f"{group}-new.mp3"},
+                    confidence="high",
+                    reason="test",
+                ),
+            )
+        )
+    tags = [pair[0] for pair in proposals]
+    renames = [pair[1] for pair in proposals]
+    plan = ReviewPlan.create(
+        str(tmp_path),
+        False,
+        rename_proposals=renames,
+        tag_proposals=tags,
+    )
+    monkeypatch.setattr(
+        apply_module,
+        "ensure_app_dirs",
+        lambda: app_paths(tmp_path / "state"),
+    )
+
+    def fake_apply(item, _journal):
+        status = "failed" if item.decision_group_id == "first" else "succeeded"
+        return ApplyResult(item.id, status, item.path, "injected")
+
+    monkeypatch.setattr(apply_module, "_apply_tag", fake_apply)
+
+    results = apply_module.apply_review_plan(
+        plan,
+        [item.id for item in (*tags, *renames)],
+    )
+    statuses = {result.proposal_id: result.status for result in results}
+
+    assert statuses["first-tag"] == "failed"
+    assert statuses["first-rename"] == "blocked"
+    assert statuses["second-tag"] == "succeeded"
+    assert statuses["second-rename"] == "succeeded"
+    assert Path(renames[0].old_path).is_file()
+    assert Path(renames[1].new_path).is_file()

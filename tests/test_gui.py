@@ -1,8 +1,28 @@
-# pylint: disable=import-error
+# pylint: disable=import-error,protected-access
+
+from datetime import datetime
+from pathlib import Path
 
 from gui import workers
+from gui.presentation import format_local_timestamp
 from gui.workers import BackgroundJobs
+from renamer import apply as apply_module
 from renamer.review_models import RenameProposal, ReviewPlan, canonical_path
+from renamer.review_service import analyze_folder
+
+
+def test_history_timestamps_are_converted_to_local_time():
+    timestamp = "2026-07-13T07:05:10.468747+00:00"
+
+    expected = datetime.fromisoformat(timestamp).astimezone().strftime(
+        "%Y-%m-%d %I:%M:%S %p %Z"
+    )
+
+    assert format_local_timestamp(timestamp) == expected
+
+
+def test_history_timestamp_falls_back_when_invalid():
+    assert format_local_timestamp("not-a-timestamp") == "not-a-timestamp"
 
 
 def test_organize_worker_only_analyzes_and_never_applies(tmp_path, monkeypatch):
@@ -110,3 +130,39 @@ def test_worker_cancel_uses_current_operation_token(tmp_path, monkeypatch):
 
     assert observed[0].is_set()
     assert jobs.events.get_nowait()[0] == "organize-complete"
+
+
+def test_gui_services_apply_exact_reviewed_plan_and_undo(
+    tmp_path,
+    monkeypatch,
+    app_paths,
+):
+    source = tmp_path / "artist - song.mp3"
+    source.write_bytes(b"disposable audio fixture")
+    monkeypatch.setattr(
+        apply_module,
+        "ensure_app_dirs",
+        lambda: app_paths(tmp_path / "state"),
+    )
+
+    plan = analyze_folder(
+        str(tmp_path),
+        recursive=False,
+        include_duplicates=False,
+    )
+
+    assert len(plan.rename_proposals) == 1
+    proposal = plan.rename_proposals[0]
+    results = apply_module.apply_review_plan(plan, [proposal.id])
+
+    assert results[0].status == "succeeded"
+    names_after_apply = {path.name for path in tmp_path.iterdir()}
+    assert Path(proposal.new_path).name in names_after_apply
+    assert source.name not in names_after_apply
+
+    undo_results = apply_module.undo_batch(plan.batch_id)
+
+    assert undo_results[0].status == "succeeded"
+    names_after_undo = {path.name for path in tmp_path.iterdir()}
+    assert source.name in names_after_undo
+    assert Path(proposal.new_path).name not in names_after_undo
