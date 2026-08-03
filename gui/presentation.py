@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from gui.theme import _IMAGE_EXTENSIONS, _SHARED_ARTWORK_NAMES
 from renamer.proposal_selection import requires_review
 from renamer.review_models import ReviewPlan
 
@@ -19,6 +20,55 @@ def format_local_timestamp(value: str) -> str:
         return local.strftime("%Y-%m-%d %I:%M:%S %p %Z")
     except (TypeError, ValueError):
         return value
+
+
+def format_progress_log(stage: str, current: int, total: int, path: str) -> str:
+    """Format one background-worker progress event for the activity pane."""
+    return f"{stage}: {current}/{total}  {path or 'working'}"
+
+
+def shared_folder_artwork(folder: str) -> tuple[Path, ...]:
+    """Return player fallback artwork placed directly in one music folder."""
+    candidates = []
+    for path in Path(folder).iterdir():
+        name = path.name.casefold()
+        generated_album_art = (
+            name.startswith("albumart_") and path.suffix.casefold() in _IMAGE_EXTENSIONS
+        )
+        if path.is_file() and (name in _SHARED_ARTWORK_NAMES or generated_album_art):
+            candidates.append(path)
+    return tuple(sorted(candidates, key=lambda path: path.name.casefold()))
+
+
+def confidence_color(confidence: object) -> str:
+    """Return the inspector color for a proposal confidence."""
+    return {
+        "HIGH": "green",
+        "MEDIUM": "#b8860b",
+        "LOW": "red",
+        "BLOCKING": "red",
+    }.get(str(confidence).upper(), "black")
+
+
+def metadata_differences(proposal) -> tuple[tuple[str, object, object], ...]:
+    """Return the compact metadata field comparison for the inspector."""
+    if not (hasattr(proposal, "before") and hasattr(proposal, "after")):
+        return ()
+    before, after = proposal.before, proposal.after
+    return (
+        ("Artist", before.get("artist"), after.get("artist")),
+        ("Title", before.get("title"), after.get("title")),
+        ("Album", before.get("album"), after.get("album")),
+        ("Track", before.get("track_number"), after.get("track_number")),
+    )
+
+
+def proposal_evidence(proposal) -> tuple[dict, dict]:
+    """Normalize provider evidence from models and plain mappings."""
+    evidence = getattr(proposal, "evidence", None)
+    values = evidence.to_dict() if hasattr(evidence, "to_dict") else evidence
+    values = values if isinstance(values, dict) else {}
+    return values.get("identification") or {}, values.get("musicbrainz") or {}
 
 
 def tag_display(values: dict[str, object]) -> str:
@@ -58,41 +108,8 @@ def _tag_proposed_display(item) -> str:
 
 def plan_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
     rows = []
-    for item in plan.rename_proposals:
-        rows.append(
-            DisplayRow(
-                tree="renames",
-                item_id=item.id,
-                action=_action_label(item, "Rename"),
-                path=item.old_path,
-                current=str(item.current_values.get("filename", "")),
-                proposed=str(item.proposed_values.get("filename", "")),
-                confidence=(
-                    "review" if requires_review(item) else item.confidence
-                ),
-                is_change=True,
-            )
-        )
-    for item in plan.tag_proposals:
-        rows.append(
-            DisplayRow(
-                tree="tags",
-                item_id=item.id,
-                action=_action_label(
-                    item,
-                    "Metadata enrichment"
-                    if item.evidence.get("musicbrainz")
-                    else "Tag repair",
-                ),
-                path=item.path,
-                current=tag_display(item.before),
-                proposed=_tag_proposed_display(item),
-                confidence=(
-                    "review" if requires_review(item) else item.confidence
-                ),
-                is_change=True,
-            )
-        )
+    rows.extend(_rename_rows(plan))
+    rows.extend(_tag_rows(plan))
     for item in plan.duplicate_findings:
         paths = item.paths or ("",)
         for index, path in enumerate(paths, start=1):
@@ -120,6 +137,41 @@ def plan_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
     return tuple(rows)
 
 
+def _rename_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
+    return tuple(
+        DisplayRow(
+            tree="renames",
+            item_id=item.id,
+            action=_action_label(item, "Rename"),
+            path=item.old_path,
+            current=str(item.current_values.get("filename", "")),
+            proposed=str(item.proposed_values.get("filename", "")),
+            confidence="review" if requires_review(item) else item.confidence,
+            is_change=True,
+        )
+        for item in plan.rename_proposals
+    )
+
+
+def _tag_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
+    return tuple(
+        DisplayRow(
+            tree="tags",
+            item_id=item.id,
+            action=_action_label(
+                item,
+                "Metadata enrichment" if item.evidence.get("musicbrainz") else "Tag repair",
+            ),
+            path=item.path,
+            current=tag_display(item.before),
+            proposed=_tag_proposed_display(item),
+            confidence="review" if requires_review(item) else item.confidence,
+            is_change=True,
+        )
+        for item in plan.tag_proposals
+    )
+
+
 def filename_validation_error(
     filename: str,
     old_path: str,
@@ -139,8 +191,13 @@ def filename_validation_error(
 
 __all__ = [
     "DisplayRow",
+    "confidence_color",
     "filename_validation_error",
+    "format_progress_log",
     "format_local_timestamp",
+    "metadata_differences",
     "plan_rows",
+    "proposal_evidence",
+    "shared_folder_artwork",
     "tag_display",
 ]

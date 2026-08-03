@@ -4,6 +4,9 @@ from types import SimpleNamespace
 
 from gui import app as gui_app
 from gui.app import SongOrganizerApp
+from gui.controllers import actions as action_controller
+from gui.controllers import context_menu as context_menu_controller
+from gui.session import ReviewSession
 from renamer.domain.issues import ReviewIssue
 from renamer.review_models import (
     DuplicateFinding,
@@ -71,6 +74,12 @@ class _FakeTree:
         return {"values": self.rows[row]}
 
 
+def _bare_app(plan=None) -> SongOrganizerApp:
+    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app.session = ReviewSession(plan=plan)
+    return app
+
+
 def test_select_all_only_affects_the_active_metadata_tab(tmp_path):
     source = tmp_path / "old.mp3"
     source.write_bytes(b"audio")
@@ -97,15 +106,13 @@ def test_select_all_only_affects_the_active_metadata_tab(tmp_path):
         confidence="high",
         reason="test",
     )
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = ReviewPlan.create(
+    app = _bare_app(ReviewPlan.create(
         str(tmp_path),
         False,
         rename_proposals=[rename],
         tag_proposals=[tag],
-    )
-    app.selected_ids = set()
-    app._row_ids = {
+    ))
+    app.session.row_ids = {
         ("renames", "shared-row"): rename.id,
         ("tags", "shared-row"): tag.id,
         ("errors", "shared-row"): "issue-1",
@@ -120,7 +127,7 @@ def test_select_all_only_affects_the_active_metadata_tab(tmp_path):
 
     app._select_all()
 
-    assert app.selected_ids == {tag.id}
+    assert app.session.selected_ids == {tag.id}
     assert app.trees["renames"].rows["shared-row"][0] == "☐"
     assert app.trees["tags"].rows["shared-row"][0] == "☑"
 
@@ -150,15 +157,13 @@ def test_checkbox_selects_the_entire_decision_group(tmp_path):
         confidence="high",
         reason="test",
     )
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = ReviewPlan.create(
+    app = _bare_app(ReviewPlan.create(
         str(tmp_path),
         False,
         rename_proposals=[rename],
         tag_proposals=[tag],
-    )
-    app.selected_ids = set()
-    app._row_ids = {
+    ))
+    app.session.row_ids = {
         ("renames", "rename-row"): rename.id,
         ("tags", "tag-row"): tag.id,
     }
@@ -170,7 +175,7 @@ def test_checkbox_selects_the_entire_decision_group(tmp_path):
 
     app._handle_tree_click("renames", SimpleNamespace(x=5, y="rename-row"))
 
-    assert app.selected_ids == {rename.id, tag.id}
+    assert app.session.selected_ids == {rename.id, tag.id}
     assert app.trees["renames"].rows["rename-row"][0] == "☑"
     assert app.trees["tags"].rows["tag-row"][0] == "☑"
 
@@ -194,14 +199,12 @@ def test_checkbox_can_select_applyable_review_item(tmp_path):
             "review the proposed filename.",
         ),
     )
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = ReviewPlan.create(
+    app = _bare_app(ReviewPlan.create(
         str(tmp_path),
         False,
         rename_proposals=[review],
-    )
-    app.selected_ids = set()
-    app._row_ids = {("renames", "review-row"): review.id}
+    ))
+    app.session.row_ids = {("renames", "review-row"): review.id}
     app.trees = {
         "renames": _FakeTree({"review-row": ("☐",)}),
         "tags": _FakeTree({}),
@@ -216,7 +219,7 @@ def test_checkbox_can_select_applyable_review_item(tmp_path):
     assert result == "break"
     assert review.requires_review
     assert review.apply_eligible
-    assert app.selected_ids == {review.id}
+    assert app.session.selected_ids == {review.id}
     assert app.trees["renames"].rows["review-row"][0] == "☑"
 
 
@@ -247,14 +250,12 @@ def test_select_all_ready_skips_destination_collisions(tmp_path):
         reason="test",
         warnings=("Destination already exists: collision.mp3",),
     )
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = ReviewPlan.create(
+    app = _bare_app(ReviewPlan.create(
         str(tmp_path),
         False,
         rename_proposals=[safe, review],
-    )
-    app.selected_ids = set()
-    app._row_ids = {
+    ))
+    app.session.row_ids = {
         ("renames", "safe-row"): safe.id,
         ("renames", "review-row"): review.id,
     }
@@ -270,15 +271,14 @@ def test_select_all_ready_skips_destination_collisions(tmp_path):
 
     app._select_all()
 
-    assert app.selected_ids == {safe.id}
+    assert app.session.selected_ids == {safe.id}
     assert app.trees["renames"].rows["safe-row"][0] == "☑"
     assert app.trees["renames"].rows["review-row"][0] == "☐"
 
 
 def test_checkbox_toggles_all_shift_selected_rows():
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.selected_ids = set()
-    app._row_ids = {
+    app = _bare_app()
+    app.session.row_ids = {
         ("renames", "row-1"): "rename-1",
         ("renames", "row-2"): "rename-2",
     }
@@ -299,7 +299,7 @@ def test_checkbox_toggles_all_shift_selected_rows():
     )
 
     assert result == "break"
-    assert app.selected_ids == {"rename-1", "rename-2"}
+    assert app.session.selected_ids == {"rename-1", "rename-2"}
     assert app.trees["renames"].rows["row-1"][0] == "☑"
     assert app.trees["renames"].rows["row-2"][0] == "☑"
 
@@ -326,15 +326,13 @@ def test_shift_clicking_checkbox_selects_the_range(tmp_path):
         rows[f"row-{index}"] = ("☐",)
         row_ids[("renames", f"row-{index}")] = proposal.id
 
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = ReviewPlan.create(
+    app = _bare_app(ReviewPlan.create(
         str(tmp_path),
         False,
         rename_proposals=proposals,
-    )
-    app.selected_ids = set()
-    app._row_ids = row_ids
-    app._selection_anchors = {"renames": "row-1"}
+    ))
+    app.session.row_ids = row_ids
+    app.session.selection_anchors = {"renames": "row-1"}
     app.trees = {
         "renames": _FakeTree(rows, selected=("row-1",)),
         "tags": _FakeTree({}),
@@ -352,7 +350,7 @@ def test_shift_clicking_checkbox_selects_the_range(tmp_path):
         "row-2",
         "row-3",
     )
-    assert app.selected_ids == {
+    assert app.session.selected_ids == {
         "rename-1",
         "rename-2",
         "rename-3",
@@ -360,9 +358,9 @@ def test_shift_clicking_checkbox_selects_the_range(tmp_path):
 
 
 def test_right_click_file_opens_context_menu_for_exact_path(monkeypatch):
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app = _bare_app()
     app.root = object()
-    app._row_paths = {
+    app.session.row_paths = {
         ("renames", "row-1"): r"F:\Music\Hip-Hop\Artist - Song.mp3",
     }
     app.trees = {
@@ -400,13 +398,13 @@ def test_right_click_file_opens_context_menu_for_exact_path(monkeypatch):
 def test_open_file_explorer_passes_target_as_separate_argument(tmp_path, monkeypatch):
     path = tmp_path / "Artist - Song.mp3"
     path.write_bytes(b"audio")
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app = _bare_app()
     calls = []
 
     def fake_popen(command, **options):
         calls.append((command, options))
 
-    monkeypatch.setattr(gui_app.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(context_menu_controller.subprocess, "Popen", fake_popen)
 
     app._open_in_file_explorer(str(path))
 
@@ -429,7 +427,7 @@ def test_shared_artwork_guard_removes_only_player_fallbacks(
     for path in (folder_art, generated_art, unrelated_art):
         path.write_bytes(b"image")
     monkeypatch.setattr(gui_app.messagebox, "askyesnocancel", lambda *_args, **_kwargs: True)
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app = _bare_app()
 
     removed = app._resolve_shared_folder_artwork(str(tmp_path))
 
@@ -453,7 +451,7 @@ def test_shared_artwork_dialog_caps_the_filename_preview(tmp_path, monkeypatch):
         return False
 
     monkeypatch.setattr(gui_app.messagebox, "askyesnocancel", decline_removal)
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app = _bare_app()
 
     removed = app._resolve_shared_folder_artwork(str(tmp_path))
 
@@ -516,15 +514,12 @@ def test_select_missing_artwork_includes_medium_confidence_proposals(tmp_path):
             "release_id": "release",
         },
     )
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = ReviewPlan.create(
+    app = _bare_app(ReviewPlan.create(
         str(tmp_path),
         False,
         tag_proposals=[proposal],
-    )
-    app.selected_ids = set()
-    app._row_ids = {("tags", "artwork-row"): proposal.id}
-    app._applied_group_ids = set()
+    ))
+    app.session.row_ids = {("tags", "artwork-row"): proposal.id}
     tags = _FakeTree({"artwork-row": ("☐",)})
     tags.master = "tags-frame"
     app.trees = {
@@ -538,14 +533,14 @@ def test_select_missing_artwork_includes_medium_confidence_proposals(tmp_path):
 
     app._select_artwork()
 
-    assert app.selected_ids == {proposal.id}
+    assert app.session.selected_ids == {proposal.id}
     assert tags.rows["artwork-row"][0] == "☑"
     assert selected_tabs == ["tags-frame"]
     assert app.status_var.value == "Selected 1 verified cover-art change(s)."
 
 
 def test_populate_plan_renders_each_duplicate_path(tmp_path):
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app = _bare_app()
     rendered = []
     app._clear_trees = lambda: None
     app._insert_row = lambda *values: rendered.append(values)
@@ -642,10 +637,8 @@ def test_select_recommended_only_affects_the_active_metadata_tab(tmp_path):
         tag_proposals=[tag],
     )
 
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = plan
-    app.selected_ids = set()
-    app._row_ids = {
+    app = _bare_app(plan)
+    app.session.row_ids = {
         ("renames", "rename-row"): rename.id,
         ("renames", "low-row"): low_confidence_rename.id,
         ("renames", "unsafe-row"): unsafe_rename.id,
@@ -667,7 +660,7 @@ def test_select_recommended_only_affects_the_active_metadata_tab(tmp_path):
 
     app._select_recommended()
 
-    assert app.selected_ids == {tag.id}
+    assert app.session.selected_ids == {tag.id}
     assert app.trees["renames"].rows["rename-row"][0] == "☐"
     assert app.trees["tags"].rows["tag-row"][0] == "☑"
 
@@ -687,15 +680,14 @@ def test_edit_selected_filename_updates_plan_and_selection(tmp_path, monkeypatch
         confidence="high",
         reason="test",
     )
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app.plan = ReviewPlan.create(
+    app = _bare_app(ReviewPlan.create(
         str(tmp_path),
         False,
         rename_proposals=[proposal],
-    )
-    app.selected_ids = {proposal.id}
-    app._row_ids = {("renames", "rename-row"): proposal.id}
-    app._row_paths = {}
+    ))
+    app.session.selected_ids = {proposal.id}
+    app.session.row_ids = {("renames", "rename-row"): proposal.id}
+    app.session.row_paths = {}
     app.trees = {
         "renames": _FakeTree(
             {"rename-row": ("☑", "Rename", str(source), "old summary", "high")},
@@ -708,19 +700,19 @@ def test_edit_selected_filename_updates_plan_and_selection(tmp_path, monkeypatch
     app.root = None
     app.status_var = _FakeStatus()
     monkeypatch.setattr(
-        gui_app,
+        action_controller,
         "_ask_filename",
         lambda *_args, **_kwargs: "Artist - Correct Spelling.mp3",
     )
 
     app._edit_selected_filename()
 
-    updated = app.plan.rename_proposals[0]
+    updated = app.session.plan.rename_proposals[0]
     assert updated.proposed_values["filename"] == "Artist - Correct Spelling.mp3"
     assert updated.new_path.endswith("Artist - Correct Spelling.mp3")
-    assert updated.id in app.selected_ids
-    assert proposal.id not in app.selected_ids
-    assert app.plan.validate_digest()
+    assert updated.id in app.session.selected_ids
+    assert proposal.id not in app.session.selected_ids
+    assert app.session.plan.validate_digest()
     assert any(
         values[3] == "Artist - Correct Spelling.mp3"
         for values in app.trees["renames"].rows.values()
@@ -756,7 +748,7 @@ class _FakeActivityLog:
 
 
 def test_progress_events_are_written_to_the_activity_log():
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app = _bare_app()
     app.activity_log = _FakeActivityLog()
     app.status_var = _FakeStatus()
 
@@ -779,7 +771,7 @@ def test_progress_events_are_written_to_the_activity_log():
 
 
 def test_activity_log_only_follows_tail_when_already_at_bottom():
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+    app = _bare_app()
     app.activity_log = _FakeActivityLog(view=(0.2, 0.5))
 
     app._append_activity_log("new entry")
@@ -793,8 +785,7 @@ def test_activity_log_only_follows_tail_when_already_at_bottom():
 
 
 def test_recovery_override_requires_confirmation_once_per_folder(monkeypatch):
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
-    app._recovery_overrides = set()
+    app = _bare_app()
     messages = []
     app._append_activity_log = messages.append
     confirmations = []
