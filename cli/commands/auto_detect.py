@@ -6,8 +6,8 @@ from argparse import Namespace
 from pathlib import Path
 
 from cli.output import Output
-from renamer.extractor import extract_track, scan_folder
-from renamer.strategy import StrategySample, infer_strategy
+from renamer.strategy_inference import StrategySample, infer_strategy
+from renamer.track_extraction import extract_track, scan_folder
 
 
 def run(args: Namespace, output: Output) -> int:

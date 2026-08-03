@@ -9,7 +9,7 @@ MusicBrainz, or already sitting in the file's existing tags).
 
 from __future__ import annotations
 
-from .regular_parser import normalize_text
+from .filename_parser import normalize_text
 
 GENRE_ALIASES: dict[str, str] = {
     "rap": "Hip-Hop",

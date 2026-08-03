@@ -4,13 +4,11 @@ from __future__ import annotations
 
 import os
 
-from ..extractor import TrackInfo, extract_track, scan_folder
-from ..formatter import build_filename
+from ..filename_builder import build_filename
+from ..filename_parser import normalize_text, normalize_title_text
 from ..media import read_media
 from ..musicbrainz import enrich_track
-from ..naming.identity import filename_identity_hint
 from ..quarantine import is_quarantined
-from ..regular_parser import normalize_text, normalize_title_text
 from ..review_models import (
     FileSnapshot,
     RenameProposal,
@@ -18,8 +16,10 @@ from ..review_models import (
     path_key,
     proposal_id,
 )
-from .common import ProgressCallback, emit, issue
-from .extraction import extract_tracks
+from ..track_extraction import TrackInfo, extract_track, scan_folder
+from ..track_identity import filename_identity_hint
+from .parallel_extraction import extract_tracks
+from .progress import ProgressCallback, emit, issue
 from .readiness import refresh_rename_readiness
 
 

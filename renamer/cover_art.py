@@ -7,9 +7,9 @@ from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from .cache import enrichment_cache
 from .domain.metadata import StagedArtwork
 from .online import Provider, ProviderError, RateLimiter, RequestPolicy
+from .online.cache import enrichment_cache
 
 _MAX_ART_BYTES = 5 * 1024 * 1024
 _ACCEPTED_MIME_TYPES = {"image/jpeg", "image/png"}

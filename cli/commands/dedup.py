@@ -7,7 +7,7 @@ from pathlib import Path
 
 from cli.commands.shared import command_folders
 from cli.output import Output
-from renamer.universal_dedup import dedup_folder
+from renamer.dedup import dedup_folder
 
 
 def run(args: Namespace, output: Output) -> int:

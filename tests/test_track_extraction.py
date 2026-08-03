@@ -1,7 +1,7 @@
 # pylint: disable=import-error,protected-access
 
-from renamer import extractor
-from renamer.extractor import TrackInfo, extract_track
+from renamer import track_extraction as extractor
+from renamer.track_extraction import TrackInfo, extract_track
 
 
 def test_successful_acoustid_match_precedes_readable_tags(tmp_path, monkeypatch):

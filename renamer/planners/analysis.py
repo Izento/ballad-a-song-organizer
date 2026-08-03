@@ -4,15 +4,19 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
 
+from ..dedup import (
+    RegularTrack,
+    analyze_duplicates,
+    analyze_regular_duplicates,
+    collect_tracks,
+)
 from ..domain.issues import ReviewIssue
-from ..regular_dedup import RegularTrack, analyze_regular_duplicates, collect_tracks
 from ..review_models import ReviewPlan, canonical_path, path_key
-from ..universal_dedup import analyze_duplicates
-from .common import ProgressCallback, emit, issue
+from ..tag_audit import plan_tag_updates
 from .enrichment import plan_metadata_enrichment
+from .progress import ProgressCallback, emit, issue
 from .readiness import coordinate_tag_proposals
 from .rename import plan_renames
-from .tags import plan_tag_updates
 
 
 def _duplicate_findings(

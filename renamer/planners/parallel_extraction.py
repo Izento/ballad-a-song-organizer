@@ -5,8 +5,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
-from ..extractor import TrackInfo, extract_track
-from .common import ProgressCallback, emit
+from ..track_extraction import TrackInfo, extract_track
+from .progress import ProgressCallback, emit
 
 ONLINE_EXTRACTION_WORKERS = 4
 ExtractTrack = Callable[..., TrackInfo]

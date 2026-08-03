@@ -11,27 +11,20 @@ from typing import Any
 
 from ..acoustid import cache_write_batch
 from ..cover_art import download_front_art
-from ..domain.identity import Confidence, weakest_confidence
+from ..domain.evidence import Confidence, weakest_confidence
 from ..domain.issues import ReviewIssue
-from ..extractor import TrackInfo, scan_folder
-from ..formatter import build_filename, split_feat
-from ..genre_aliases import normalize_genre_list
-from ..identification import identify
-from ..media import read_media
-from ..musicbrainz import enrich_recording
-from ..naming.identity import (
-    artist_appears_in,
-    filename_identity_hint,
-    identity_is_recognizable,
-    is_placeholder_artist,
-)
-from ..qualifiers import preserve_local_versions, remove_safe_noise
-from ..quarantine import is_quarantined
-from ..regular_parser import (
+from ..filename_builder import build_filename, split_feat
+from ..filename_parser import (
     normalize_text,
     parse_regular_filename,
     split_features,
 )
+from ..genre_aliases import normalize_genre_list
+from ..identification import identify
+from ..media import read_media
+from ..musicbrainz import enrich_recording
+from ..qualifiers import preserve_local_versions, remove_safe_noise
+from ..quarantine import is_quarantined
 from ..review_models import (
     FileSnapshot,
     RenameProposal,
@@ -40,7 +33,14 @@ from ..review_models import (
     path_key,
     proposal_id,
 )
-from .common import ProgressCallback, emit, issue
+from ..track_extraction import TrackInfo, scan_folder
+from ..track_identity import (
+    artist_appears_in,
+    filename_identity_hint,
+    identity_is_recognizable,
+    is_placeholder_artist,
+)
+from .progress import ProgressCallback, emit, issue
 from .readiness import refresh_rename_readiness
 
 _SAFE_DERIVATIVE_FIELDS = frozenset(

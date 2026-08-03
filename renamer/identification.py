@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 
-from .cache import enrichment_cache
-from .domain.identity import RecordingIdentity
-from .naming.identity import filename_identity_hint, reconcile_online_version
+from .domain.evidence import RecordingIdentity
+from .online.cache import enrichment_cache
+from .track_identity import filename_identity_hint, reconcile_online_version
 
 RecordingEvidence = RecordingIdentity
 

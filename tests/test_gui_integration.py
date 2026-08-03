@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from renamer import apply as apply_module
-from renamer.review_api import analyze_folder
+from renamer.review_service import analyze_folder
 
 
 def _test_app_paths(root: Path):

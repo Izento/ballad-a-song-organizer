@@ -6,7 +6,7 @@ import queue
 import threading
 
 from renamer.apply import apply_review_plan, undo_batch
-from renamer.review_api import analyze_folder
+from renamer.review_service import analyze_folder
 
 
 class BackgroundJobs:

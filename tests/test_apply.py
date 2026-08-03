@@ -6,7 +6,7 @@ import shutil
 from pathlib import Path
 
 from renamer import apply as apply_module
-from renamer.media import MediaRead, read_media
+from renamer.media import MediaRead, read_media, write_tags_to_file
 from renamer.review_models import (
     ApplyResult,
     FileSnapshot,
@@ -14,7 +14,6 @@ from renamer.review_models import (
     ReviewPlan,
     TagProposal,
 )
-from renamer.tag_writer import write_tags_to_file
 
 
 def _test_app_paths(root: Path):

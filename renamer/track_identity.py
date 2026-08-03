@@ -7,14 +7,14 @@ import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..qualifiers import (
+from .filename_parser import RegularName, normalize_text, parse_regular_filename
+from .qualifiers import (
     has_explicit_variant,
     has_instrumental_qualifier,
     has_matching_qualifier,
     parse_qualifiers,
     preserve_local_versions,
 )
-from ..regular_parser import RegularName, normalize_text, parse_regular_filename
 
 _VERSION_BLOCK_RE = re.compile(r"[\(\[]\s*[^\)\]]+?\s*[\)\]]")
 _VERSION_CREDIT_RE = re.compile(r"\b(?:edit|mix|remix|version)\b", re.IGNORECASE)

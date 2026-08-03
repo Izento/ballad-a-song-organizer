@@ -8,10 +8,10 @@ from pathlib import Path
 from cli.commands.shared import command_folders, online_key
 from cli.output import Output
 from renamer.apply import apply_review_plan
-from renamer.extractor import scan_folder
-from renamer.review_api import plan_renames
+from renamer.proposal_selection import eligible_ids
 from renamer.review_models import ReviewPlan
-from renamer.selection import eligible_ids
+from renamer.review_service import plan_renames
+from renamer.track_extraction import scan_folder
 
 
 def _selected_ids(proposals, interactive: bool, output: Output) -> list[str]:

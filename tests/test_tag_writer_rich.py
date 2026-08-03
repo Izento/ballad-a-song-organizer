@@ -2,7 +2,7 @@
 
 from mutagen.id3 import ID3
 
-from renamer import tag_writer
+from renamer.media import writer
 
 
 def test_mp3_writer_embeds_rich_tags_and_front_art(tmp_path):
@@ -11,7 +11,7 @@ def test_mp3_writer_embeds_rich_tags_and_front_art(tmp_path):
     artwork = tmp_path / "cover.jpg"
     artwork.write_bytes(b"\xff\xd8\xffcover")
 
-    tag_writer._write_mp3(
+    writer._write_mp3(
         str(path),
         {
             "artist": "Artist",

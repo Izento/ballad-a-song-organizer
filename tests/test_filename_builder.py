@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from renamer.formatter import build_filename, safe_part
+from renamer.filename_builder import build_filename, safe_part
 
 
 def test_windows_reserved_and_control_names_are_safe():

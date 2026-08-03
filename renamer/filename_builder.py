@@ -1,6 +1,6 @@
 import re
 
-from .regular_parser import normalize_title_text
+from .filename_parser import normalize_title_text
 
 WINDOWS_UNSAFE_RE = re.compile(r'[\x00-\x1f<>"/\\|?*]')
 SUBTITLE_COLON_RE = re.compile(r':\s+')  # "Game: Subtitle" → "Game - Subtitle"
@@ -46,7 +46,7 @@ def split_feat(raw: str) -> tuple[str, list[str]]:
     # Keep one conservative feature parser for both filename parsing and tag
     # extraction.  In particular, this leaves labels such as "(Remix)" and
     # "(Radio Edit)" in the title.
-    from .regular_parser import split_features
+    from .filename_parser import split_features
 
     cleaned, features = split_features(raw)
     return cleaned, list(features)

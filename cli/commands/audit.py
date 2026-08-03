@@ -7,7 +7,7 @@ from pathlib import Path
 
 from cli.commands.shared import command_folders, online_key
 from cli.output import Output
-from renamer.review_api import analyze_folder
+from renamer.review_service import analyze_folder
 
 
 def run(args: Namespace, output: Output) -> int:

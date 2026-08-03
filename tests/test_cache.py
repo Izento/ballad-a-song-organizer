@@ -1,6 +1,6 @@
 # pylint: disable=import-error
 
-from renamer.cache import EnrichmentCache
+from renamer.online.cache import EnrichmentCache
 
 
 def test_cache_round_trips_json_values_and_expiry(tmp_path):

@@ -3,10 +3,10 @@
 import threading
 import time
 
-from renamer import review_api
-from renamer.extractor import TrackInfo
+from renamer import review_service as review_api
 from renamer.media import MediaRead
 from renamer.review_models import FileSnapshot, RenameProposal, TagProposal
+from renamer.track_extraction import TrackInfo
 
 
 def test_rename_analysis_is_read_only(tmp_path):

@@ -9,14 +9,14 @@ from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
 
-from .cache import enrichment_cache
-from .domain.identity import Confidence
+from .domain.evidence import Confidence
 from .domain.metadata import CanonicalMetadata
+from .filename_parser import normalize_text, split_features
 from .online import RateLimiter
-from .regular_parser import normalize_text, split_features
+from .online.cache import enrichment_cache
 
 if TYPE_CHECKING:
-    from .extractor import TrackInfo
+    from .track_extraction import TrackInfo
 
 _RELEASE_CACHE: dict[str, list] = {}
 _CACHE_REQUEST_LOCK = threading.Lock()

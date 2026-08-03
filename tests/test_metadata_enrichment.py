@@ -5,7 +5,7 @@ import time
 
 import pytest
 
-from renamer import review_api
+from renamer import review_service as review_api
 from renamer.identification import RecordingEvidence
 from renamer.media import MediaRead
 from renamer.musicbrainz import EnrichmentResult

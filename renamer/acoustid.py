@@ -6,11 +6,11 @@ import os
 import threading
 from contextlib import contextmanager
 
+from .filename_parser import normalize_text
 from .fingerprint import fingerprint_file_details
-from .naming.identity import filename_identity_hint
 from .online import Provider, ProviderError, RateLimiter, RequestPolicy
-from .regular_parser import normalize_text
 from .runtime import app_paths, atomic_write_json, resolve_fpcalc
+from .track_identity import filename_identity_hint
 
 _CACHE_PATH = str(app_paths()['cache'] / 'acoustid_cache.json')
 _cache: dict | None = None
@@ -265,7 +265,7 @@ def _parse_result(
     Normalize AcoustID result into our structured format.
     Splits feat. artists out of both the title and the artist string.
     """
-    from .formatter import split_feat
+    from .filename_builder import split_feat
 
     clean_title, feat_from_title = split_feat(title)
     clean_artist, feat_from_artist = split_feat(artist)

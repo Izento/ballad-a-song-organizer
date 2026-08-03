@@ -13,12 +13,12 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from .extractor import AUDIO_EXTENSIONS
+from .filename_parser import RegularName, normalize_text, parse_regular_stem
 from .fingerprint import fingerprint_file
 from .media import read_media
-from .naming import TrackIdentity
-from .regular_parser import RegularName, normalize_text, parse_regular_stem
 from .review_models import DuplicateFinding, path_key, proposal_id
+from .track_extraction import AUDIO_EXTENSIONS
+from .track_identity import TrackIdentity
 
 
 @dataclass
@@ -271,7 +271,26 @@ def analyze_regular_duplicates(
     return sorted(findings, key=lambda item: item.paths)
 
 
-def dedup_regular_folder(
+def analyze_duplicates(
+    folder_path: str,
+    recursive: bool = False,
+    progress: Callable[[int, int, str], None] | None = None,
+    cancel_event=None,
+    fingerprint: bool = False,
+    identity_overrides: dict[str, tuple[str, str]] | None = None,
+) -> list[DuplicateFinding]:
+    """Analyze supported audio files with the standard evidence policy."""
+    return analyze_regular_duplicates(
+        folder_path,
+        recursive=recursive,
+        progress=progress,
+        cancel_event=cancel_event,
+        fingerprint=fingerprint,
+        identity_overrides=identity_overrides,
+    )
+
+
+def dedup_folder(
     folder_path: str,
     dry_run: bool = True,
     recursive: bool = False,
@@ -313,7 +332,8 @@ def dedup_regular_folder(
 
 __all__ = [
     "RegularTrack",
+    "analyze_duplicates",
     "analyze_regular_duplicates",
     "collect_tracks",
-    "dedup_regular_folder",
+    "dedup_folder",
 ]

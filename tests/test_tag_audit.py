@@ -1,8 +1,8 @@
 # pylint: disable=import-error
 
 from renamer.media import MediaRead
+from renamer.media.legacy_filename import parse_stem
 from renamer.tag_audit import audit_tag_file, audit_tags_for_folder
-from renamer.tag_writer import parse_stem
 
 
 def test_filename_is_source_of_truth_for_regular_tags(tmp_path, monkeypatch):

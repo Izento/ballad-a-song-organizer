@@ -7,10 +7,9 @@ import os
 import shutil
 from pathlib import Path
 
-from ..media import read_media
+from ..media import read_media, write_tags_to_file
 from ..media.schema import metadata_matches
-from ..tag_writer import write_tags_to_file
-from .errors import ApplyBlocked
+from .state import ApplyBlocked
 
 
 def restore_metadata_snapshot(

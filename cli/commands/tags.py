@@ -8,9 +8,9 @@ from pathlib import Path
 from cli.commands.shared import command_folders
 from cli.output import Output
 from renamer.apply import apply_review_plan
-from renamer.extractor import scan_folder
-from renamer.review_api import plan_tag_updates
 from renamer.review_models import ReviewPlan
+from renamer.review_service import plan_tag_updates
+from renamer.track_extraction import scan_folder
 
 
 def run(args: Namespace, output: Output) -> int:

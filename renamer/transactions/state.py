@@ -8,6 +8,10 @@ from enum import StrEnum
 from ..review_models import RenameProposal, TagProposal
 
 
+class ApplyBlocked(RuntimeError):
+    """A reviewed action cannot safely cross the mutation boundary."""
+
+
 class TransactionState(StrEnum):
     READY = "ready"
     TAGGING = "tagging"
@@ -84,4 +88,9 @@ def group_transactions(
     return [transactions[group_id] for group_id in order]
 
 
-__all__ = ["SongTransaction", "TransactionState", "group_transactions"]
+__all__ = [
+    "ApplyBlocked",
+    "SongTransaction",
+    "TransactionState",
+    "group_transactions",
+]

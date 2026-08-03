@@ -36,14 +36,31 @@ from renamer.apply import (
 from renamer.domain.issues import ReviewIssue
 from renamer.media import read_front_artwork
 from renamer.musicbrainz import is_available as musicbrainz_available
+from renamer.proposal_selection import (
+    action_items as _action_items,
+)
+from renamer.proposal_selection import (
+    artwork_ids as _artwork_ids,
+)
+from renamer.proposal_selection import (
+    expand_group_selection as _expand_group_selection,
+)
+from renamer.proposal_selection import (
+    grouped_action_ids as _grouped_action_ids,
+)
+from renamer.proposal_selection import (
+    is_high_confidence_action as _is_high_confidence_action,
+)
+from renamer.proposal_selection import (
+    recommended_ids as _recommended_ids,
+)
+from renamer.proposal_selection import (
+    requires_review as _requires_review,
+)
 from renamer.quarantine import (
     load_quarantine,
     quarantine_file,
     unquarantine_files,
-)
-from renamer.review_api import (
-    coordinate_tag_proposals,
-    refresh_rename_readiness,
 )
 from renamer.review_models import (
     ReviewPlan,
@@ -51,32 +68,15 @@ from renamer.review_models import (
     path_key,
     proposal_id,
 )
+from renamer.review_service import (
+    coordinate_tag_proposals,
+    refresh_rename_readiness,
+)
 from renamer.runtime import (
     ensure_app_dirs,
     resolve_acoustid_key,
     resolve_fpcalc,
     resource_path,
-)
-from renamer.selection import (
-    action_items as _action_items,
-)
-from renamer.selection import (
-    artwork_ids as _artwork_ids,
-)
-from renamer.selection import (
-    expand_group_selection as _expand_group_selection,
-)
-from renamer.selection import (
-    grouped_action_ids as _grouped_action_ids,
-)
-from renamer.selection import (
-    is_high_confidence_action as _is_high_confidence_action,
-)
-from renamer.selection import (
-    recommended_ids as _recommended_ids,
-)
-from renamer.selection import (
-    requires_review as _requires_review,
 )
 
 GUI_TITLE = "Ballad"

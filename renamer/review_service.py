@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from .cover_art import download_front_art
-from .extractor import extract_track
 from .identification import identify
 from .media import read_media
 from .musicbrainz import enrich_recording, enrich_track
@@ -11,7 +10,7 @@ from .planners.analysis import analyze_folder
 from .planners.enrichment import (
     plan_metadata_enrichment as _plan_metadata_enrichment,
 )
-from .planners.extraction import (
+from .planners.parallel_extraction import (
     ONLINE_EXTRACTION_WORKERS,
     extract_tracks,
 )
@@ -21,8 +20,9 @@ from .planners.readiness import (
     refresh_rename_readiness,
 )
 from .planners.rename import plan_renames as _plan_renames
-from .planners.tags import plan_tag_updates
 from .review_models import path_key as _path_key
+from .tag_audit import plan_tag_updates
+from .track_extraction import extract_track
 
 _ONLINE_EXTRACTION_WORKERS = ONLINE_EXTRACTION_WORKERS
 _proposal_identity = proposal_identity

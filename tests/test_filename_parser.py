@@ -1,6 +1,6 @@
 # pylint: disable=import-error
 
-from renamer.regular_parser import parse_regular_filename
+from renamer.filename_parser import parse_regular_filename
 
 
 def test_explicit_features_are_extracted_and_versions_preserved():

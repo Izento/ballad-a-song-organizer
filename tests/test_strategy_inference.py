@@ -1,6 +1,6 @@
 # pylint: disable=import-error
 
-from renamer.strategy import StrategySample, infer_strategy
+from renamer.strategy_inference import StrategySample, infer_strategy
 
 
 def test_track_number_majority_recommends_musicbrainz():

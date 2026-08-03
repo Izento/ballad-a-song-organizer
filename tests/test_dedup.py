@@ -1,6 +1,6 @@
 import pytest
 
-from renamer.regular_dedup import analyze_regular_duplicates, collect_tracks
+from renamer.dedup import analyze_regular_duplicates, collect_tracks
 from renamer.review_models import path_key
 
 

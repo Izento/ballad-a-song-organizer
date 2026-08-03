@@ -2,14 +2,14 @@ import os
 import re
 from dataclasses import replace
 
-from .domain.identity import ExtractedTrack
-from .formatter import split_feat, strip_ocremix_suffix
-from .media import read_media
-from .naming.identity import reconcile_online_version
-from .regular_parser import (
+from .domain.evidence import ExtractedTrack
+from .filename_builder import split_feat, strip_ocremix_suffix
+from .filename_parser import (
     normalize_title_text,
     parse_regular_stem,
 )
+from .media import read_media
+from .track_identity import reconcile_online_version
 
 AUDIO_EXTENSIONS = {
     '.mp3',
@@ -145,7 +145,7 @@ def _from_ocremix_new_tags(path: str, ext: str, tags: dict) -> TrackInfo:
 
 
 def _from_ocremix_writer_tags(path: str, ext: str, tags: dict) -> TrackInfo:
-    """Read the schema written by tag_writer.py without reinterpreting TIT3."""
+    """Read the schema written by the canonical tag writer without reinterpreting TIT3."""
     game = normalize_title_text(
         (tags.get('TPE1') or tags.get('TALB') or tags.get('TIT1', '')).strip()
     )

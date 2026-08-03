@@ -6,8 +6,8 @@ from dataclasses import replace
 from pathlib import Path
 
 from ..domain.issues import IssueCode, ReviewIssue
-from ..formatter import split_feat
-from ..regular_parser import normalize_text, split_feature_names
+from ..filename_builder import split_feat
+from ..filename_parser import normalize_text, split_feature_names
 from ..review_models import (
     RenameProposal,
     TagProposal,

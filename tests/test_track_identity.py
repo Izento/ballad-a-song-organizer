@@ -3,7 +3,7 @@
 import pytest
 
 from renamer.domain.issues import ReviewIssue
-from renamer.naming.identity import (
+from renamer.track_identity import (
     artist_appears_in,
     identity_is_recognizable,
     is_placeholder_artist,

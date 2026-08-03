@@ -60,7 +60,6 @@ packages = [
     "renamer.domain",
     "renamer.media",
     "renamer.media.adapters",
-    "renamer.naming",
     "renamer.online",
     "renamer.planners",
     "renamer.transactions",

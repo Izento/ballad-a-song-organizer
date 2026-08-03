@@ -8,7 +8,7 @@ from collections.abc import Iterable
 from pathlib import Path
 
 from ..cover_art import ArtworkRef, verify_artwork
-from ..naming.identity import is_placeholder_artist
+from ..media import supports_tag_writing
 from ..review_models import (
     ApplyResult,
     RenameProposal,
@@ -16,8 +16,8 @@ from ..review_models import (
     TagProposal,
     path_key,
 )
-from ..tag_writer import supports_tag_writing
-from .errors import ApplyBlocked
+from ..track_identity import is_placeholder_artist
+from .state import ApplyBlocked
 
 
 def blocked_result(

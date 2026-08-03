@@ -7,10 +7,28 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .domain.issues import ReviewIssue
-from .media import read_media
-from .regular_parser import format_title, parse_regular_stem
+from .filename_parser import format_title, parse_regular_stem
+from .media import read_media, supports_tag_writing
+from .media.legacy_filename import parse_stem
 from .review_models import FileSnapshot, TagProposal, path_key, proposal_id
-from .tag_writer import supports_tag_writing
+
+
+def plan_tag_updates(
+    folder_path: str,
+    recursive: bool = True,
+    progress: Callable[[str, int, int, str], None] | None = None,
+    cancel_event=None,
+):
+    """Plan tag repairs implied by supported filenames."""
+    def audit_progress(current: int, total: int, path: str) -> None:
+        progress("tag-audit", current, total, path)
+
+    return audit_tags_for_folder(
+        folder_path,
+        recursive=recursive,
+        progress=audit_progress if progress else None,
+        cancel_event=cancel_event,
+    )
 
 
 def expected_tags_from_filename(
@@ -22,8 +40,6 @@ def expected_tags_from_filename(
         extension = Path(path).suffix.lower() or "this file type"
         raise ValueError(f"Tag writing is not supported for {extension} files")
     stem = Path(path).stem
-    from .tag_writer import parse_stem
-
     parsed = parse_stem(stem)
     if parsed is not None and parsed["is_ocremix"]:
         expected = dict(current)
@@ -97,7 +113,7 @@ def audit_tags_for_folder(
     progress: Callable[[int, int, str], None] | None = None,
     cancel_event=None,
 ) -> tuple[list[TagProposal], list[dict]]:
-    from .extractor import scan_folder
+    from .track_extraction import scan_folder
 
     proposals: list[TagProposal] = []
     issues: list[dict] = []
@@ -126,4 +142,5 @@ __all__ = [
     "audit_tag_file",
     "audit_tags_for_folder",
     "expected_tags_from_filename",
+    "plan_tag_updates",
 ]

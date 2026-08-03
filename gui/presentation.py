@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from renamer.proposal_selection import requires_review
 from renamer.review_models import ReviewPlan
-from renamer.selection import requires_review
 
 
 def format_local_timestamp(value: str) -> str:

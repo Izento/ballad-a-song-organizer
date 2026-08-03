@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from ..regular_parser import (
+from ..filename_parser import (
     format_title,
     normalize_title_text,
     parse_regular_stem,

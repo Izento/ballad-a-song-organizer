@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
 
-from .domain.identity import Evidence
+from .domain.evidence import Evidence
 from .domain.issues import ReviewIssue, apply_eligible, proposal_issues, requires_review
 from .domain.metadata import (
     ArtworkDescriptor,

@@ -8,8 +8,8 @@ from pathlib import Path
 from cli.commands.shared import command_folders, online_key
 from cli.output import Output
 from renamer.apply import apply_review_plan
-from renamer.review_api import analyze_folder
-from renamer.selection import action_items, ready_ids
+from renamer.proposal_selection import action_items, ready_ids
+from renamer.review_service import analyze_folder
 
 
 def run(args: Namespace, output: Output) -> int:

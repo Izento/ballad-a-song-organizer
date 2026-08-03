@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from .domain.metadata import artwork_to_dict
-from .media import read_front_artwork, read_media
+from .media import read_front_artwork, read_media, write_tags_to_file
 from .media.schema import metadata_matches
 from .review_models import (
     ApplyResult,
@@ -25,7 +25,6 @@ from .review_models import (
     sha256_file,
 )
 from .runtime import atomic_write_json, ensure_app_dirs
-from .tag_writer import write_tags_to_file
 from .transactions import (
     ApplyBlocked,
     TransactionState,
