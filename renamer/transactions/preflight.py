@@ -39,24 +39,14 @@ def selected_proposals(
     selected_ids: Iterable[str],
 ) -> tuple[list[RenameProposal], list[TagProposal]]:
     selected = set(selected_ids)
-    renames = [
-        item for item in plan.rename_proposals if item.id in selected
-    ]
+    renames = [item for item in plan.rename_proposals if item.id in selected]
     tags = [item for item in plan.tag_proposals if item.id in selected]
     unknown = selected - {item.id for item in (*renames, *tags)}
     if unknown:
-        raise ApplyBlocked(
-            f"Unknown proposal IDs: {', '.join(sorted(unknown))}"
-        )
-    ineligible = [
-        item.id
-        for item in (*renames, *tags)
-        if not item.apply_eligible
-    ]
+        raise ApplyBlocked(f"Unknown proposal IDs: {', '.join(sorted(unknown))}")
+    ineligible = [item.id for item in (*renames, *tags) if not item.apply_eligible]
     if ineligible:
-        raise ApplyBlocked(
-            f"Ineligible proposal IDs: {', '.join(sorted(ineligible))}"
-        )
+        raise ApplyBlocked(f"Ineligible proposal IDs: {', '.join(sorted(ineligible))}")
     return renames, tags
 
 
@@ -170,20 +160,14 @@ def _validate_temporary_space(
         return
     try:
         required = max(os.path.getsize(item.path) for item in eligible)
-        free = min(
-            shutil.disk_usage(Path(item.path).parent).free
-            for item in eligible
-        )
+        free = min(shutil.disk_usage(Path(item.path).parent).free for item in eligible)
     except OSError as exc:
         message = f"Cannot inspect temporary write space: {exc}"
         for item in eligible:
             block(item.id, item.path, message)
         return
     if free < required:
-        message = (
-            "Insufficient free space for one temporary tag write "
-            f"({required} bytes needed)"
-        )
+        message = f"Insufficient free space for one temporary tag write ({required} bytes needed)"
         for item in eligible:
             block(item.id, item.path, message)
 
@@ -219,11 +203,7 @@ def _eligible_source_keys(
     renames: list[RenameProposal],
     blocked: dict[str, ApplyResult],
 ) -> set[str]:
-    return {
-        path_key(item.old_path)
-        for item in renames
-        if item.id not in blocked
-    }
+    return {path_key(item.old_path) for item in renames if item.id not in blocked}
 
 
 def _destination_is_blocked(item: RenameProposal, source_keys: set[str], block) -> bool:
@@ -237,9 +217,7 @@ def _destination_is_blocked(item: RenameProposal, source_keys: set[str], block) 
         return True
     try:
         existing = {
-            path_key(str(candidate))
-            for candidate in parent.iterdir()
-            if candidate.exists()
+            path_key(str(candidate)) for candidate in parent.iterdir() if candidate.exists()
         }
     except OSError as exc:
         block(
@@ -302,11 +280,7 @@ def preflight(
     _validate_destinations(renames, blocked, block)
     safe_renames = [item for item in renames if item.id not in blocked]
     safe_tags = [item for item in tags if item.id not in blocked]
-    results = [
-        blocked[item.id]
-        for item in (*renames, *tags)
-        if item.id in blocked
-    ]
+    results = [blocked[item.id] for item in (*renames, *tags) if item.id in blocked]
     return safe_renames, safe_tags, results
 
 

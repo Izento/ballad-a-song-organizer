@@ -111,8 +111,7 @@ def test_enrich_recording_maps_verified_release_fields(monkeypatch):
         "_mb",
         lambda: SimpleNamespace(
             get_recording_by_id=lambda *_args, **kwargs: (
-                recording_includes.extend(kwargs["includes"])
-                or recording_response
+                recording_includes.extend(kwargs["includes"]) or recording_response
             ),
             get_release_by_id=lambda *_args, **_kwargs: release_response,
             get_work_by_id=lambda *_args, **_kwargs: {},
@@ -363,9 +362,7 @@ def test_metadata_uses_vocal_relation_for_filename_feature():
 
 
 def test_artist_credit_name_does_not_add_trailing_separator():
-    name = musicbrainz._artist_credit_name(
-        [{"artist": {"name": "Solo Artist"}, "joinphrase": ""}]
-    )
+    name = musicbrainz._artist_credit_name([{"artist": {"name": "Solo Artist"}, "joinphrase": ""}])
 
     assert name == "Solo Artist"
 

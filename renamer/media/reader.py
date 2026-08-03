@@ -53,42 +53,53 @@ def _adapter(audio: Any):
     return None
 
 
-def read_media(path: str) -> MediaRead:
-    """Read technical details and canonical metadata from one media file."""
+def _open_media(path: str) -> tuple[Any | None, MediaRead | None]:
     try:
         import mutagen
     except ImportError as exc:
-        return MediaRead(path=path, status="error", error=str(exc))
+        return None, MediaRead(path=path, status="error", error=str(exc))
 
     try:
-        audio = mutagen.File(path)
+        return mutagen.File(path), None
     except PermissionError as exc:
-        return MediaRead(path=path, status="permission_denied", error=str(exc))
+        return None, MediaRead(path=path, status="permission_denied", error=str(exc))
     except OSError as exc:
-        return MediaRead(path=path, status="unreadable", error=str(exc))
+        return None, MediaRead(path=path, status="unreadable", error=str(exc))
     except Exception as exc:  # pylint: disable=broad-exception-caught
-        return MediaRead(path=path, status="malformed", error=str(exc))
-    if audio is None:
-        return MediaRead(path=path, status="unsupported", error="Unsupported media")
+        return None, MediaRead(path=path, status="malformed", error=str(exc))
 
-    adapter = _adapter(audio)
-    info = getattr(audio, "info", None)
-    duration = getattr(info, "length", None)
-    bitrate = getattr(info, "bitrate", None)
+
+def _read_metadata(
+    path: str,
+    audio: Any,
+    adapter: Any,
+) -> tuple[CanonicalMetadata, ArtworkDescriptor | None, MediaRead | None]:
     if adapter is None:
-        tags = CanonicalMetadata()
-        artwork = None
-    else:
-        try:
-            tags = CanonicalMetadata(adapter.read_tags(audio))
-            artwork = adapter.read_artwork(audio)
-        except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
-            return MediaRead(
+        return CanonicalMetadata(), None, None
+    try:
+        return CanonicalMetadata(adapter.read_tags(audio)), adapter.read_artwork(audio), None
+    except (AttributeError, IndexError, KeyError, TypeError, ValueError) as exc:
+        return (
+            CanonicalMetadata(),
+            None,
+            MediaRead(
                 path=path,
                 status="malformed",
                 container=type(audio).__name__,
                 error=str(exc),
-            )
+            ),
+        )
+
+
+def _successful_media_read(
+    path: str,
+    audio: Any,
+    tags: CanonicalMetadata,
+    artwork: ArtworkDescriptor | None,
+) -> MediaRead:
+    info = getattr(audio, "info", None)
+    duration = getattr(info, "length", None)
+    bitrate = getattr(info, "bitrate", None)
     return MediaRead(
         path=path,
         status="ok" if tags else "empty",
@@ -98,6 +109,20 @@ def read_media(path: str) -> MediaRead:
         duration=float(duration) if duration is not None else None,
         bitrate=int(bitrate) if bitrate is not None else None,
     )
+
+
+def read_media(path: str) -> MediaRead:
+    """Read technical details and canonical metadata from one media file."""
+    audio, error = _open_media(path)
+    if error is not None:
+        return error
+    if audio is None:
+        return MediaRead(path=path, status="unsupported", error="Unsupported media")
+
+    tags, artwork, error = _read_metadata(path, audio, _adapter(audio))
+    if error is not None:
+        return error
+    return _successful_media_read(path, audio, tags, artwork)
 
 
 def read_front_artwork(path: str) -> tuple[bytes, str] | None:

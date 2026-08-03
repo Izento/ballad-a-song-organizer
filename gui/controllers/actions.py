@@ -136,16 +136,20 @@ class ActionControllerMixin:
 
     def _selected_proposals_in_active_tree(self) -> list[Any]:
         scope = self._active_action_scope()
-        tree_name = {"filename": "renames", "metadata": "tags"}.get(
-            scope[0], "renames"
-        ) if scope else "renames"
+        tree_name = (
+            {"filename": "renames", "metadata": "tags"}.get(scope[0], "renames")
+            if scope
+            else "renames"
+        )
         proposals = self._proposals_from_selected_rows(tree_name)
         if proposals:
             return proposals
         plan = self.session.plan
-        return [
-            item for item in action_items(plan) if item.id in self.session.selected_ids
-        ] if plan else []
+        return (
+            [item for item in action_items(plan) if item.id in self.session.selected_ids]
+            if plan
+            else []
+        )
 
     def _proposals_from_selected_rows(self, tree_name: str) -> list[Any]:
         tree = self.trees.get(tree_name)
@@ -227,12 +231,12 @@ class ActionControllerMixin:
         renames = tuple(
             item for item in plan.rename_proposals if item.decision_group_id not in group_ids
         )
-        tags = tuple(
-            item for item in plan.tag_proposals if item.decision_group_id not in group_ids
-        )
+        tags = tuple(item for item in plan.tag_proposals if item.decision_group_id not in group_ids)
         removed_ids = {
-            item_id for group_id, item_ids in grouped_action_ids(plan).items()
-            if group_id in group_ids for item_id in item_ids
+            item_id
+            for group_id, item_ids in grouped_action_ids(plan).items()
+            if group_id in group_ids
+            for item_id in item_ids
         }
         self.session.selected_ids.difference_update(removed_ids)
         updated = plan.with_proposals(renames, tags)
@@ -242,7 +246,11 @@ class ActionControllerMixin:
         self._set_selected_ids(self.session.selected_ids)
 
     def _undo_latest(self) -> None:
-        root = self.session.plan.root if self.session.plan is not None else self.folder_var.get().strip()
+        root = (
+            self.session.plan.root
+            if self.session.plan is not None
+            else self.folder_var.get().strip()
+        )
         batch = latest_undoable_batch(root or None)
         if batch is None:
             messagebox.showinfo("Nothing to undo", "No recoverable batch is available.")
@@ -287,7 +295,8 @@ class ActionControllerMixin:
             return False
         messagebox.showinfo(
             "Rename already applied" if proposal else "Rename unavailable",
-            "Organize the library again before editing this song." if proposal
+            "Organize the library again before editing this song."
+            if proposal
             else "That rename is no longer available.",
         )
         return True
@@ -299,7 +308,9 @@ class ActionControllerMixin:
             return None
         new_path = canonical_path(str(Path(proposal.old_path).with_name(filename)))
         if path_key(new_path) == path_key(proposal.old_path):
-            messagebox.showerror("No change", "The corrected filename must differ from the current filename.")
+            messagebox.showerror(
+                "No change", "The corrected filename must differ from the current filename."
+            )
             return None
         if self._rename_destination_is_taken(proposal, new_path):
             messagebox.showerror(
@@ -316,7 +327,8 @@ class ActionControllerMixin:
 
     def _replace_rename_proposal(self, proposal, new_path: str, filename: str) -> None:
         updated = replace(
-            proposal, id=proposal_id("rename", proposal.old_path, new_path),
+            proposal,
+            id=proposal_id("rename", proposal.old_path, new_path),
             new_path=new_path,
             proposed_values={**proposal.proposed_values, "filename": filename},
             reason=f"{proposal.reason} Filename corrected during review.",
@@ -330,7 +342,9 @@ class ActionControllerMixin:
         self.session.plan = plan.with_proposals(renames, tags)
         self._populate_plan(self.session.plan)
         selected = grouped_action_ids(self.session.plan).get(updated.decision_group_id, set())
-        self._set_selected_ids(selected if was_selected else self.session.selected_ids - {proposal.id})
+        self._set_selected_ids(
+            selected if was_selected else self.session.selected_ids - {proposal.id}
+        )
         self.status_var.set(f"Corrected proposed filename to {filename}.")
 
 

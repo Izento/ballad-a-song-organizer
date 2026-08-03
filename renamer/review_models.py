@@ -318,23 +318,20 @@ class ReviewPlan:
             self,
             "issues",
             tuple(
-                issue
-                if isinstance(issue, ReviewIssue)
-                else ReviewIssue.from_dict(issue)
+                issue if isinstance(issue, ReviewIssue) else ReviewIssue.from_dict(issue)
                 for issue in self.issues
             ),
         )
 
     @classmethod
-    def create(
+    def create(  # noqa: PLR0917
         cls,
         root: str,
         recursive: bool,
         rename_proposals: list[RenameProposal] | tuple[RenameProposal, ...] = (),
         tag_proposals: list[TagProposal] | tuple[TagProposal, ...] = (),
         duplicate_findings: list[DuplicateFinding] | tuple[DuplicateFinding, ...] = (),
-        issues: list[dict[str, Any] | ReviewIssue]
-        | tuple[dict[str, Any] | ReviewIssue, ...] = (),
+        issues: list[dict[str, Any] | ReviewIssue] | tuple[dict[str, Any] | ReviewIssue, ...] = (),
     ) -> ReviewPlan:
         plan = cls(
             batch_id=uuid.uuid4().hex,
@@ -347,9 +344,7 @@ class ReviewPlan:
             tag_proposals=tuple(tag_proposals),
             duplicate_findings=tuple(duplicate_findings),
             issues=tuple(
-                issue
-                if isinstance(issue, ReviewIssue)
-                else ReviewIssue.from_dict(issue)
+                issue if isinstance(issue, ReviewIssue) else ReviewIssue.from_dict(issue)
                 for issue in issues
             ),
         )
@@ -413,12 +408,9 @@ class ReviewPlan:
             rename_proposals=tuple(
                 rename_from(value) for value in data.get("rename_proposals", ())
             ),
-            tag_proposals=tuple(
-                tag_from(value) for value in data.get("tag_proposals", ())
-            ),
+            tag_proposals=tuple(tag_from(value) for value in data.get("tag_proposals", ())),
             duplicate_findings=tuple(
-                duplicate_from(value)
-                for value in data.get("duplicate_findings", ())
+                duplicate_from(value) for value in data.get("duplicate_findings", ())
             ),
             issues=tuple(data.get("issues", ())),
             digest=data.get("digest", ""),
@@ -430,9 +422,7 @@ class ReviewPlan:
     def _computed_digest(self) -> str:
         payload = self.to_dict(include_digest=False)
         return hashlib.sha256(
-            json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode(
-                "utf-8"
-            )
+            json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
         ).hexdigest()
 
     def validate_digest(self) -> bool:
@@ -469,9 +459,7 @@ class ReviewPlan:
             "created_at": self.created_at,
             "rename_proposals": [item.to_dict() for item in self.rename_proposals],
             "tag_proposals": [item.to_dict() for item in self.tag_proposals],
-            "duplicate_findings": [
-                item.to_dict() for item in self.duplicate_findings
-            ],
+            "duplicate_findings": [item.to_dict() for item in self.duplicate_findings],
             "issues": [item.to_dict() for item in self.issues],
         }
         if include_digest:

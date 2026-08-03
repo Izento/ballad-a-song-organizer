@@ -65,7 +65,7 @@ def _process_folder(
         for item in proposals[:20]:
             output.print(f"  {item.old_path}\n  → {item.new_path}")
     for issue in issues[:10]:
-        output.print(f'  [red]ERROR[/red] {issue["path"]}: {issue["message"]}')
+        output.print(f"  [red]ERROR[/red] {issue['path']}: {issue['message']}")
     return renamed, would_rename, total_files, problems
 
 
@@ -92,10 +92,7 @@ def run(args: Namespace, output: Output) -> int:
         total_files += file_count
         problems += folder_problems
     if args.apply:
-        output.print(
-            f"\nDone. Renamed {renamed} of {total_files} files. "
-            f"Problems: {problems}."
-        )
+        output.print(f"\nDone. Renamed {renamed} of {total_files} files. Problems: {problems}.")
     else:
         output.print(
             f"\nDry run complete — {would_rename} of {total_files} files "

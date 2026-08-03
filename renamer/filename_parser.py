@@ -62,6 +62,7 @@ class RegularName:
     qualifiers: tuple[str, ...] = ()
     original_stem: str = ""
 
+
 def normalize_text(value: str) -> str:
     """Normalize text for comparisons without changing display text."""
     value = value.casefold().replace("_", " ")
@@ -119,9 +120,7 @@ def split_feature_names(raw: str) -> tuple[str, ...]:
     names = []
     for item in re.split(r",|;", normalized):
         name = _clean_text(item)
-        if name and normalize_text(name) not in {
-            normalize_text(existing) for existing in names
-        }:
+        if name and normalize_text(name) not in {normalize_text(existing) for existing in names}:
             names.append(name)
     return tuple(names)
 
@@ -215,8 +214,10 @@ def _qualifiers(title: str) -> tuple[str, ...]:
     for match in _VERSION_RE.finditer(title):
         value = _clean_text(match.group(1))
         key = normalize_text(value)
-        if value and key not in seen and not re.match(
-            rf"^{_FEATURE_MARKER}\b", value, re.IGNORECASE
+        if (
+            value
+            and key not in seen
+            and not re.match(rf"^{_FEATURE_MARKER}\b", value, re.IGNORECASE)
         ):
             values.append(value)
             seen.add(key)

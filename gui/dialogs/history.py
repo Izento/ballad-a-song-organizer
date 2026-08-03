@@ -34,12 +34,18 @@ class HistoryDialogMixin:
         paned = ttk.PanedWindow(window, orient=tk.HORIZONTAL)
         paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         batch_tree = self._history_tree(
-            paned, "Applied Batches", ("status", "date", "root"),
-            (("status", "Status", 90), ("date", "Date", 130), ("root", "Folder", 180)), 1,
+            paned,
+            "Applied Batches",
+            ("status", "date", "root"),
+            (("status", "Status", 90), ("date", "Date", 130), ("root", "Folder", 180)),
+            1,
         )
         action_tree = self._history_tree(
-            paned, "Changed Files in Batch", ("file", "action", "status"),
-            (("file", "File / Target", 280), ("action", "Kind", 70), ("status", "Status", 80)), 2,
+            paned,
+            "Changed Files in Batch",
+            ("file", "action", "status"),
+            (("file", "File / Target", 280), ("action", "Kind", 70), ("status", "Status", 80)),
+            2,
         )
         return window, batch_tree, action_tree
 
@@ -62,7 +68,9 @@ class HistoryDialogMixin:
         for batch_id, batch in batches.items():
             if batch_id:
                 tree.insert(
-                    "", tk.END, iid=batch_id,
+                    "",
+                    tk.END,
+                    iid=batch_id,
                     values=(
                         batch.get("status", "unknown"),
                         format_local_timestamp(batch.get("created_at", "")),
@@ -81,7 +89,9 @@ class HistoryDialogMixin:
             row_id = f"act_{index}"
             action_groups[row_id] = action.get("decision_group_id") or path_key(path)
             action_tree.insert(
-                "", tk.END, iid=row_id,
+                "",
+                tk.END,
+                iid=row_id,
                 values=(Path(path).name, action.get("kind", ""), action.get("status", "")),
             )
 
@@ -89,13 +99,15 @@ class HistoryDialogMixin:
         bottom = ttk.Frame(window, padding=(10, 0, 10, 10))
         bottom.pack(fill=tk.X)
         ttk.Button(
-            bottom, text="Restore selected file(s)",
+            bottom,
+            text="Restore selected file(s)",
             command=lambda: self._restore_selected_history(
                 window, batch_tree, action_tree, action_groups
             ),
         ).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Button(
-            bottom, text="Restore entire batch",
+            bottom,
+            text="Restore entire batch",
             command=lambda: self._restore_entire_history(window, batch_tree),
         ).pack(side=tk.LEFT)
         ttk.Button(bottom, text="Close", command=window.destroy).pack(side=tk.RIGHT)
@@ -121,9 +133,7 @@ class HistoryDialogMixin:
 
     def _confirm_restore(self, count: int | None, scope: str) -> bool:
         label = f"{count} {scope}" if count is not None else scope
-        return messagebox.askyesno(
-            f"Restore {scope}", f"Restore {label} from batch history?"
-        )
+        return messagebox.askyesno(f"Restore {scope}", f"Restore {label} from batch history?")
 
     def _finish_restore(self, window, results) -> None:
         succeeded = sum(result.status == "succeeded" for result in results)

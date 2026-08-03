@@ -73,7 +73,8 @@ class SelectionControllerMixin:
     def _toggle_checked_rows(self, tree_name: str, tree, row: str, event):
         rows = self._checkbox_rows(tree_name, tree, row, event)
         item_ids = {
-            item_id for selected_row in rows
+            item_id
+            for selected_row in rows
             if (item_id := self.session.row_ids.get((tree_name, selected_row)))
         }
         clicked_id = self.session.row_ids.get((tree_name, row))
@@ -104,18 +105,21 @@ class SelectionControllerMixin:
         visible_rows = list(tree.get_children(""))
         if anchor in visible_rows and row in visible_rows:
             start, end = visible_rows.index(anchor), visible_rows.index(row)
-            rows = visible_rows[min(start, end):max(start, end) + 1]
+            rows = visible_rows[min(start, end) : max(start, end) + 1]
             tree.selection_set(rows)
         return rows
 
     def _toggle_unbound_ids(self, clicked_id: str, item_ids: set[str]) -> None:
         selected = self.session.selected_ids
-        self._set_selected_ids(selected - item_ids if clicked_id in selected else selected | item_ids)
+        self._set_selected_ids(
+            selected - item_ids if clicked_id in selected else selected | item_ids
+        )
 
     def _selection_is_blocked(self, proposal) -> bool:
         if self._group_was_applied(proposal):
             self.status_var.set(
-                "This song was already changed in this run. Organize again before making more changes."
+                "This song was already changed in this run. "
+                "Organize again before making more changes."
             )
             return True
         if not proposal.apply_eligible:
@@ -129,15 +133,17 @@ class SelectionControllerMixin:
         plan = self.session.plan
         groups = grouped_action_ids(plan)
         selected_groups = {
-            proposal.decision_group_id for item_id in item_ids
+            proposal.decision_group_id
+            for item_id in item_ids
             if (proposal := self._proposal_for_id(item_id)) is not None
-            and proposal.apply_eligible and not self._group_was_applied(proposal)
+            and proposal.apply_eligible
+            and not self._group_was_applied(proposal)
         }
-        grouped_ids = {
-            item_id for group_id in selected_groups for item_id in groups[group_id]
-        }
+        grouped_ids = {item_id for group_id in selected_groups for item_id in groups[group_id]}
         selected = self.session.selected_ids
-        self._set_selected_ids(selected - grouped_ids if clicked_id in selected else selected | grouped_ids)
+        self._set_selected_ids(
+            selected - grouped_ids if clicked_id in selected else selected | grouped_ids
+        )
 
     def _active_action_scope(self) -> tuple[str, tuple] | None:
         plan = self.session.plan
@@ -148,9 +154,7 @@ class SelectionControllerMixin:
             return "filename", tuple(plan.rename_proposals)
         if active_tab == str(self.tabs["tags"]):
             return "metadata", tuple(plan.tag_proposals)
-        self.status_var.set(
-            "Open Filename changes or Metadata changes before selecting changes."
-        )
+        self.status_var.set("Open Filename changes or Metadata changes before selecting changes.")
         return None
 
     def _select_recommended(self) -> None:
@@ -167,9 +171,7 @@ class SelectionControllerMixin:
         if scope is None:
             return
         name, items = scope
-        selected = {
-            item.id for item in items if item.apply_eligible and not item.requires_review
-        }
+        selected = {item.id for item in items if item.apply_eligible and not item.requires_review}
         self._set_selected_ids(selected, expand_groups=False)
         self.status_var.set(
             f"Selected {len(selected)} ready {name} change(s); "
@@ -197,7 +199,8 @@ class SelectionControllerMixin:
         plan = self.session.plan
         selected = (
             expand_group_selection(plan, selected_ids, include_review=True)
-            if plan is not None and expand_groups else set(selected_ids)
+            if plan is not None and expand_groups
+            else set(selected_ids)
         )
         if plan is not None:
             selected = self._without_applied_ids(selected, plan)
@@ -207,9 +210,11 @@ class SelectionControllerMixin:
 
     def _without_applied_ids(self, selected: set[str], plan) -> set[str]:
         return {
-            item_id for group_id, item_ids in grouped_action_ids(plan).items()
+            item_id
+            for group_id, item_ids in grouped_action_ids(plan).items()
             if group_id not in self.session.applied_group_ids
-            for item_id in item_ids if item_id in selected
+            for item_id in item_ids
+            if item_id in selected
         }
 
     def _render_selected_checkboxes(self) -> None:
@@ -218,9 +223,11 @@ class SelectionControllerMixin:
             for row in tree.get_children(""):
                 values = list(tree.item(row, "values"))
                 if values:
-                    values[0] = "☑" if self.session.row_ids.get(
-                        (tree_name, row)
-                    ) in self.session.selected_ids else "☐"
+                    values[0] = (
+                        "☑"
+                        if self.session.row_ids.get((tree_name, row)) in self.session.selected_ids
+                        else "☐"
+                    )
                     tree.item(row, values=values)
 
 

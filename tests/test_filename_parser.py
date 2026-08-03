@@ -4,9 +4,7 @@ from renamer.filename_parser import parse_regular_filename
 
 
 def test_explicit_features_are_extracted_and_versions_preserved():
-    parsed = parse_regular_filename(
-        "Artist - Song (feat. Guest, Other) (Radio Edit).mp3"
-    )
+    parsed = parse_regular_filename("Artist - Song (feat. Guest, Other) (Radio Edit).mp3")
 
     assert parsed is not None
     assert parsed.artist == "Artist"
@@ -52,9 +50,7 @@ def test_known_promo_suffix_is_removed():
 
 
 def test_extensions_and_parentheses_are_canonicalized():
-    parsed = parse_regular_filename(
-        "Artist - Song ((feat. Guest)) [Radio Edit].mp3.mp3"
-    )
+    parsed = parse_regular_filename("Artist - Song ((feat. Guest)) [Radio Edit].mp3.mp3")
 
     assert parsed is not None
     assert parsed.title == "Song (Radio Edit)"
@@ -62,9 +58,7 @@ def test_extensions_and_parentheses_are_canonicalized():
 
 
 def test_missing_feature_parenthesis_is_repaired_without_losing_qualifier():
-    parsed = parse_regular_filename(
-        "Artist - Song (feat. Guest (Ripped Version).mp3"
-    )
+    parsed = parse_regular_filename("Artist - Song (feat. Guest (Ripped Version).mp3")
 
     assert parsed is not None
     assert parsed.title == "Song"

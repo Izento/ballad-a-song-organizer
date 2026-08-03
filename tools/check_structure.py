@@ -44,13 +44,9 @@ def _violations(path: Path) -> list[str]:
         depth = _nested_depth(node)
         location = f"{path}:{node.lineno} {node.name}"
         if length > MAX_FUNCTION_LINES:
-            violations.append(
-                f"{location}: {length} lines (maximum {MAX_FUNCTION_LINES})"
-            )
+            violations.append(f"{location}: {length} lines (maximum {MAX_FUNCTION_LINES})")
         if depth > MAX_NESTING_DEPTH:
-            violations.append(
-                f"{location}: nesting depth {depth} (maximum {MAX_NESTING_DEPTH})"
-            )
+            violations.append(f"{location}: nesting depth {depth} (maximum {MAX_NESTING_DEPTH})")
     return violations
 
 

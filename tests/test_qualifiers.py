@@ -28,10 +28,13 @@ def test_explicit_extended_version_is_retained_when_online_title_omits_it():
         "Matador De Dragao (Extended)",
         "Matador De Dragão",
     )
-    assert preserve_local_versions(
-        "Matador De Dragao (Extended)",
-        "Matador De Dragão",
-    ) == "Matador De Dragão (Extended)"
+    assert (
+        preserve_local_versions(
+            "Matador De Dragao (Extended)",
+            "Matador De Dragão",
+        )
+        == "Matador De Dragão (Extended)"
+    )
 
 
 def test_quality_wrapper_is_removed_but_radio_edit_remains_identity():

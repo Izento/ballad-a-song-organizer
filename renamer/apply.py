@@ -117,9 +117,7 @@ def _metadata_backup_path(batch_id: str, source: str) -> Path:
 def _tag_temporary_path(path: str, batch_id: str, proposal_id: str) -> Path:
     source = Path(path)
     safe_id = re.sub(r"[^A-Za-z0-9_-]", "", proposal_id)[:24]
-    return source.with_name(
-        f".songorganizer-{batch_id[:12]}-{safe_id}{source.suffix}"
-    )
+    return source.with_name(f".songorganizer-{batch_id[:12]}-{safe_id}{source.suffix}")
 
 
 def _backup_front_artwork(item: TagProposal, backup: Path) -> dict | None:
@@ -201,8 +199,7 @@ def _write_and_verify_tag(item: TagProposal, temporary: Path) -> None:
     if not metadata_matches(item.after, media.tags):
         raise ApplyBlocked("Canonical tag verification failed.")
     if item.artwork_after and (
-        media.artwork is None
-        or media.artwork.get("sha256") != item.artwork_after.get("sha256")
+        media.artwork is None or media.artwork.get("sha256") != item.artwork_after.get("sha256")
     ):
         raise ApplyBlocked("Artwork verification failed.")
 
@@ -278,9 +275,7 @@ def _staged_rename_paths(
     source_keys = {path_key(item.old_path) for item in renames}
     staged = {}
     for index, item in enumerate(renames):
-        if path_key(item.new_path) in source_keys or _same_path(
-            item.old_path, item.new_path
-        ):
+        if path_key(item.new_path) in source_keys or _same_path(item.old_path, item.new_path):
             staged[item.id] = _temporary_path(
                 item.old_path,
                 journal.data["batch_id"],
@@ -412,9 +407,7 @@ def _ordered_results(
 ) -> list[ApplyResult]:
     results_by_id = {result.proposal_id: result for result in results}
     return [
-        results_by_id[proposal_id]
-        for proposal_id in selected_ids
-        if proposal_id in results_by_id
+        results_by_id[proposal_id] for proposal_id in selected_ids if proposal_id in results_by_id
     ]
 
 
@@ -520,9 +513,7 @@ def _apply_tags(
         results.append(result)
         tag_results_by_group[item.decision_group_id] = result
         transaction = transaction.transition(
-            TransactionState.TAGGED
-            if result.status == "succeeded"
-            else TransactionState.FAILED
+            TransactionState.TAGGED if result.status == "succeeded" else TransactionState.FAILED
         )
         transaction_by_group[item.decision_group_id] = transaction
         _record_transaction_state(transaction, journal)
@@ -551,9 +542,7 @@ def _complete_rename_transaction(
     transaction = transaction_by_group[item.decision_group_id]
     transaction = transaction.transition(TransactionState.RENAMING)
     transaction = transaction.transition(
-        TransactionState.COMPLETED
-        if result.status == "succeeded"
-        else TransactionState.FAILED
+        TransactionState.COMPLETED if result.status == "succeeded" else TransactionState.FAILED
     )
     transaction_by_group[item.decision_group_id] = transaction
     _record_transaction_state(transaction, journal)
@@ -897,9 +886,7 @@ def undo_batch(
     data = read_batch(batch_id)
     results: list[ApplyResult] = []
     target_groups = (
-        {str(g).casefold() for g in decision_group_ids}
-        if decision_group_ids is not None
-        else None
+        {str(g).casefold() for g in decision_group_ids} if decision_group_ids is not None else None
     )
     for action in reversed(data.get("actions", [])):
         if target_groups is not None and _undo_action_group(action) not in target_groups:
@@ -951,10 +938,7 @@ def batches_requiring_recovery(root: str | None = None) -> list[dict]:
         actions = batch.get("actions", ())
         if any(
             action.get("status") in {"intent", "completed"}
-            or (
-                action.get("status") == "failed"
-                and action.get("rollback_status") != "succeeded"
-            )
+            or (action.get("status") == "failed" and action.get("rollback_status") != "succeeded")
             for action in actions
         ):
             batches.append(batch)
@@ -976,10 +960,7 @@ def latest_undoable_batch(root: str | None = None) -> dict | None:
             for batch in batch_history()
             if _batch_matches_root(batch, root)
             if batch.get("status") in recoverable_statuses
-            and any(
-                action.get("status") == "completed"
-                for action in batch.get("actions", ())
-            )
+            and any(action.get("status") == "completed" for action in batch.get("actions", ()))
         ),
         None,
     )

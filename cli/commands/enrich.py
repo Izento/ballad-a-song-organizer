@@ -15,9 +15,7 @@ from renamer.review_service import analyze_folder
 def _render_preview(plan, output: Output) -> None:
     for item in plan.rename_proposals[:20]:
         output.print(f"  {item.old_path}\n  → {item.new_path}")
-    output.print(
-        f"{len(plan.tag_proposals)} verified metadata proposals prepared."
-    )
+    output.print(f"{len(plan.tag_proposals)} verified metadata proposals prepared.")
 
 
 def _process_folder(
@@ -46,15 +44,11 @@ def _process_folder(
     if args.apply and selected:
         results = apply_review_plan(plan, selected)
         applied = sum(result.status == "succeeded" for result in results)
-        problems += sum(
-            result.status in {"blocked", "failed"} for result in results
-        )
+        problems += sum(result.status in {"blocked", "failed"} for result in results)
     else:
         _render_preview(plan, output)
     for issue in plan.issues[:10]:
-        output.print(
-            f'  [yellow]SKIPPED[/yellow] {issue["path"]}: {issue["message"]}'
-        )
+        output.print(f"  [yellow]SKIPPED[/yellow] {issue['path']}: {issue['message']}")
     return applied, skipped, problems
 
 

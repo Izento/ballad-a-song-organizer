@@ -35,8 +35,7 @@ def run(args: Namespace, output: Output) -> int:
     for name, count in recommendation.counts.items():
         output.print(f"  {name}: {count}/{recommendation.sample_size} files")
     output.print(
-        f"\nRecommended strategy: {recommendation.strategy or 'auto'}\n"
-        f"Note: {recommendation.note}"
+        f"\nRecommended strategy: {recommendation.strategy or 'auto'}\nNote: {recommendation.note}"
     )
     output.print("\nSuggested config.yaml entry:")
     output.print(f'  - path: "{folder}"')

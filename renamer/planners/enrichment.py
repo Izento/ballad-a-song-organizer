@@ -54,9 +54,7 @@ _SAFE_DERIVATIVE_FIELDS = frozenset(
         "performer",
     }
 )
-_PROTECTED_LOCAL_TITLE_MARKERS = frozenset(
-    {"cypher", "diss", "freestyle", "unreleased"}
-)
+_PROTECTED_LOCAL_TITLE_MARKERS = frozenset({"cypher", "diss", "freestyle", "unreleased"})
 _IDENTIFICATION_WORKERS = 4
 _ENRICHMENT_WORKERS = 4
 _ARTWORK_WORKERS = 3
@@ -105,6 +103,7 @@ class IdentifiedFile:
     def recording_id(self) -> str:
         return self.evidence.resolved_recording_id
 
+
 def _merge_features(
     *groups: tuple[str, ...],
     include_partial_matches: bool = False,
@@ -147,12 +146,8 @@ def _local_feature_names(
     filename,
     media,
 ) -> tuple[str, ...]:
-    _tag_artist, artist_features = split_features(
-        str(media.tags.get("artist") or "")
-    )
-    _tag_title, title_features = split_features(
-        str(media.tags.get("title") or "")
-    )
+    _tag_artist, artist_features = split_features(str(media.tags.get("artist") or ""))
+    _tag_title, title_features = split_features(str(media.tags.get("title") or ""))
     filename_features = filename.features if filename is not None else ()
     return _merge_features(
         tuple(filename_features),
@@ -200,13 +195,10 @@ def _preserve_local_coartist(values: dict, media) -> dict:
     ]
     proposed_artist = str(values.get("artist") or "")
     if len(components) < 2 or not any(
-        normalize_text(proposed_artist) == normalize_text(component)
-        for component in components
+        normalize_text(proposed_artist) == normalize_text(component) for component in components
     ):
         return values
-    clean_title, title_features = split_features(
-        str(values.get("title") or "")
-    )
+    clean_title, title_features = split_features(str(values.get("title") or ""))
     coartist_features = tuple(
         feature
         for feature in title_features
@@ -220,9 +212,7 @@ def _preserve_local_coartist(values: dict, media) -> dict:
     if not coartist_features:
         return values
     remaining_features = tuple(
-        feature
-        for feature in title_features
-        if feature not in coartist_features
+        feature for feature in title_features if feature not in coartist_features
     )
     values["artist"] = local_artist
     values["title"] = _title_with_features(clean_title, remaining_features)
@@ -232,11 +222,7 @@ def _preserve_local_coartist(values: dict, media) -> dict:
 def _enriched_values(path, media, evidence, enriched):
     values = dict(enriched.values)
     filename = parse_regular_filename(Path(path).name)
-    local_title = (
-        filename.title
-        if filename is not None
-        else media.tags.get("title", "")
-    )
+    local_title = filename.title if filename is not None else media.tags.get("title", "")
     if values.get("title"):
         online_title = preserve_local_versions(
             local_title,
@@ -248,16 +234,13 @@ def _enriched_values(path, media, evidence, enriched):
         )
     values = _preserve_local_coartist(values, media)
     if evidence.is_derivative:
-        values = {
-            key: value
-            for key, value in values.items()
-            if key in _SAFE_DERIVATIVE_FIELDS
-        }
+        values = {key: value for key, value in values.items() if key in _SAFE_DERIVATIVE_FIELDS}
     return values
 
 
 def _tag_proposal(
     path: str,
+    *,
     snapshot: FileSnapshot,
     media,
     after: dict,
@@ -294,6 +277,7 @@ def _tag_proposal(
 
 def _rename_proposal(
     path: str,
+    *,
     snapshot: FileSnapshot,
     media,
     after: dict,
@@ -374,9 +358,7 @@ def _identity_warning(path: str, media, values: dict) -> str:
         return ""
     claims = _local_identities(path, media)
     label_prefixed = Path(path).stem.count(" - ") >= 2
-    if not claims or (
-        label_prefixed and artist_appears_in(Path(path).stem, proposed_artist)
-    ):
+    if not claims or (label_prefixed and artist_appears_in(Path(path).stem, proposed_artist)):
         return ""
     if any(
         identity_is_recognizable(
@@ -390,8 +372,8 @@ def _identity_warning(path: str, media, values: dict) -> str:
         return ""
     local_artist, local_title = claims[0]
     return (
-        f"Identity mismatch: this file says \"{local_artist} - {local_title}\" "
-        f"but the matched recording is \"{proposed_artist} - {proposed_title}\". "
+        f'Identity mismatch: this file says "{local_artist} - {local_title}" '
+        f'but the matched recording is "{proposed_artist} - {proposed_title}". '
         "Confirm the match before applying."
     )
 
@@ -422,9 +404,8 @@ def _protected_identity_warning(path: str, media, values: dict) -> str:
         }
         if not local_markers:
             continue
-        primary_artist_survives = (
-            not local_artist
-            or artist_appears_in(proposed_artist, local_artist)
+        primary_artist_survives = not local_artist or artist_appears_in(
+            proposed_artist, local_artist
         )
         if local_markers <= proposed_markers and primary_artist_survives:
             continue
@@ -495,13 +476,7 @@ def _identify_file(
 
 
 def _run_identification(
-    paths: list[str],
-    *,
-    acoustid_key: str | None,
-    progress,
-    cancel_event,
-    media_reader,
-    identifier,
+    paths: list[str], *, acoustid_key: str | None, progress, cancel_event, media_reader, identifier
 ) -> dict[int, IdentifiedFile | EnrichedFilePlan]:
     """Read and identify files concurrently; providers retain their own limits."""
     if not paths:
@@ -521,10 +496,13 @@ def _run_identification(
         except Exception as exc:  # pylint: disable=broad-exception-caught
             return index, _identification_failure(path, str(exc))
 
-    with cache_write_batch(), ThreadPoolExecutor(
-        max_workers=worker_count,
-        thread_name_prefix="ballad-identify",
-    ) as executor:
+    with (
+        cache_write_batch(),
+        ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="ballad-identify",
+        ) as executor,
+    ):
         pending: dict[object, int] = {}
         next_index = 0
         completed = 0
@@ -560,9 +538,7 @@ def _local_evidence(candidates: list[IdentifiedFile]) -> dict[str, object]:
     return dict(
         max(
             candidates,
-            key=lambda candidate: sum(
-                bool(value) for value in candidate.media.tags.values()
-            ),
+            key=lambda candidate: sum(bool(value) for value in candidate.media.tags.values()),
         ).media.tags
     )
 
@@ -614,10 +590,7 @@ def _enrich_recordings(
         max_workers=worker_count,
         thread_name_prefix="ballad-musicbrainz",
     ) as executor:
-        futures = {
-            executor.submit(work, *task): task
-            for task in tasks
-        }
+        futures = {executor.submit(work, *task): task for task in tasks}
         completed = 0
         while futures:
             done, _ = wait(futures, return_when=FIRST_COMPLETED)
@@ -743,8 +716,7 @@ def _planning_warnings(candidate, enriched, values, after):
     warnings = tuple((*evidence.warnings, *enriched.warnings))
     if evidence.is_derivative:
         warnings += (
-            "Local derivative: source recording/release IDs and artwork "
-            "were not written.",
+            "Local derivative: source recording/release IDs and artwork were not written.",
         )
     identity_warning = _identity_warning(path, media, values)
     if identity_warning:
@@ -803,24 +775,24 @@ def _plan_identified_file(
     return EnrichedFilePlan(
         tag=_tag_proposal(
             path,
-            snapshot,
-            media,
-            after,
-            artwork_after,
-            evidence,
-            enriched,
-            warnings,
-            confidence,
+            snapshot=snapshot,
+            media=media,
+            after=after,
+            artwork_after=artwork_after,
+            evidence=evidence,
+            enriched=enriched,
+            warnings=warnings,
+            confidence=confidence,
         ),
         rename=_rename_proposal(
             path,
-            snapshot,
-            media,
-            after,
-            evidence,
-            enriched,
-            warnings,
-            confidence,
+            snapshot=snapshot,
+            media=media,
+            after=after,
+            evidence=evidence,
+            enriched=enriched,
+            warnings=warnings,
+            confidence=confidence,
         ),
     )
 

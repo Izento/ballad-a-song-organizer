@@ -73,9 +73,7 @@ def test_missing_acoustid_key_skips_lookup_and_uses_tags(tmp_path, monkeypatch):
     assert result.title == "Tagged Title"
 
 
-def test_explicit_filename_strategy_still_overrides_acoustid(
-    tmp_path, monkeypatch
-):
+def test_explicit_filename_strategy_still_overrides_acoustid(tmp_path, monkeypatch):
     path = tmp_path / "Filename Artist - Filename Title.mp3"
     path.write_bytes(b"audio")
 
@@ -124,9 +122,7 @@ def test_acoustid_version_conflict_requires_review(tmp_path):
     result = extractor._preserve_filename_version_qualifiers(str(path), track)
 
     assert result.title == "Song (Radio Edit) (Instrumental)"
-    assert result.version_warning.startswith(
-        "Version qualifier conflicts with AcoustID metadata;"
-    )
+    assert result.version_warning.startswith("Version qualifier conflicts with AcoustID metadata;")
 
 
 def test_acoustid_preserves_unparenthesized_instrumental_label(tmp_path):

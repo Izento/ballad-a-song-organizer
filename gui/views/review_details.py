@@ -78,15 +78,19 @@ class ReviewDetailsMixin:
     def _render_details_summary(self, container, proposal) -> str:
         file_path = getattr(proposal, "path", None) or getattr(proposal, "old_path", None) or ""
         ttk.Label(
-            container, text=Path(file_path).name or "Unknown file",
-            font=("TkDefaultFont", 10, "bold"), wraplength=320,
+            container,
+            text=Path(file_path).name or "Unknown file",
+            font=("TkDefaultFont", 10, "bold"),
+            wraplength=320,
         ).pack(anchor=tk.W, pady=(0, 2))
         confidence = str(getattr(proposal, "confidence", "medium")).upper()
         frame = ttk.Frame(container)
         frame.pack(fill=tk.X, pady=(0, 8))
         ttk.Label(
-            frame, text=f"Confidence: {confidence}",
-            foreground=confidence_color(confidence), font=("TkDefaultFont", 9, "bold"),
+            frame,
+            text=f"Confidence: {confidence}",
+            foreground=confidence_color(confidence),
+            font=("TkDefaultFont", 9, "bold"),
         ).pack(side=tk.LEFT)
         return file_path
 
@@ -106,15 +110,20 @@ class ReviewDetailsMixin:
 
     def _add_issue_label(self, parent, issue) -> None:
         ttk.Label(
-            parent, text=f"• {getattr(issue, 'message', str(issue))}",
+            parent,
+            text=f"• {getattr(issue, 'message', str(issue))}",
             foreground="red" if not getattr(issue, "apply_eligible", True) else "#d9534f",
-            wraplength=300, justify=tk.LEFT,
+            wraplength=300,
+            justify=tk.LEFT,
         ).pack(anchor=tk.W, pady=1)
 
     def _add_warning_label(self, parent, warning) -> None:
         ttk.Label(
-            parent, text=f"• {warning}", foreground="#d9534f",
-            wraplength=300, justify=tk.LEFT,
+            parent,
+            text=f"• {warning}",
+            foreground="#d9534f",
+            wraplength=300,
+            justify=tk.LEFT,
         ).pack(anchor=tk.W, pady=1)
 
     def _render_metadata_proposal(self, container, proposal) -> None:
@@ -134,8 +143,10 @@ class ReviewDetailsMixin:
         )
         value = f"{before or '(none)'}  ➔  {after or '(none)'}"
         ttk.Label(
-            row, text=value if before != after else f"{after or '(unchanged)'}",
-            wraplength=230, justify=tk.LEFT,
+            row,
+            text=value if before != after else f"{after or '(unchanged)'}",
+            wraplength=230,
+            justify=tk.LEFT,
         ).pack(side=tk.LEFT)
 
     def _add_filename_row(self, parent, proposal) -> None:
@@ -146,8 +157,10 @@ class ReviewDetailsMixin:
         )
         old_name, new_name = Path(proposal.old_path).name, Path(proposal.new_path).name
         ttk.Label(
-            row, text=f"{old_name}\n➔ {new_name}" if old_name != new_name else new_name,
-            wraplength=230, justify=tk.LEFT,
+            row,
+            text=f"{old_name}\n➔ {new_name}" if old_name != new_name else new_name,
+            wraplength=230,
+            justify=tk.LEFT,
         ).pack(side=tk.LEFT)
 
     def _render_provider_evidence(self, container, proposal) -> None:
@@ -168,7 +181,8 @@ class ReviewDetailsMixin:
             return
         value = int(score * 100) if isinstance(score, float) and score <= 1.0 else score
         ttk.Label(
-            parent, text=f"AcoustID Match: {value}%",
+            parent,
+            text=f"AcoustID Match: {value}%",
             font=("TkDefaultFont", 9, "bold"),
         ).pack(anchor=tk.W)
 
@@ -176,7 +190,8 @@ class ReviewDetailsMixin:
         for label, key in (("MB Recording ID", "recording_id"), ("MB Release ID", "release_id")):
             if evidence.get(key):
                 ttk.Label(
-                    parent, text=f"{label}:\n{evidence[key]}",
+                    parent,
+                    text=f"{label}:\n{evidence[key]}",
                     font=("TkDefaultFont", 8),
                 ).pack(anchor=tk.W, pady=(2, 0))
         for label, key in (("Release", "release"), ("Release Date", "date")):
@@ -195,7 +210,9 @@ class ReviewDetailsMixin:
 
     def _render_current_artwork(self, parent, proposal, file_path: str) -> None:
         frame = self._artwork_frame(parent, "Current Embedded")
-        current_art = read_front_artwork(file_path) if file_path and os.path.isfile(file_path) else None
+        current_art = (
+            read_front_artwork(file_path) if file_path and os.path.isfile(file_path) else None
+        )
         current_art_bytes, _ = current_art or (None, "")
         if not current_art_bytes:
             ttk.Label(frame, text="[No cover art]", foreground="gray").pack(pady=20)
@@ -219,8 +236,10 @@ class ReviewDetailsMixin:
         before = getattr(proposal, "artwork_before", None)
         stale = bool(before and getattr(before, "sha256", "") != current_sha)
         ttk.Label(
-            frame, text="Embedded (Stale)" if stale else "Embedded Cover",
-            font=("TkDefaultFont", 7), foreground="#d9534f" if stale else "gray",
+            frame,
+            text="Embedded (Stale)" if stale else "Embedded Cover",
+            font=("TkDefaultFont", 7),
+            foreground="#d9534f" if stale else "gray",
         ).pack(anchor=tk.N)
 
     def _render_staged_artwork(self, parent, proposal) -> None:
@@ -236,8 +255,15 @@ class ReviewDetailsMixin:
             return
         self._preview_images.append(image)
         ttk.Label(frame, image=image).pack(pady=4)
-        release_id, source_url = getattr(artwork, "release_id", ""), getattr(artwork, "source_url", "")
-        label = f"Release: {release_id[:8]}..." if release_id else ("CAA Source" if source_url else "Proposed")
+        release_id, source_url = (
+            getattr(artwork, "release_id", ""),
+            getattr(artwork, "source_url", ""),
+        )
+        label = (
+            f"Release: {release_id[:8]}..."
+            if release_id
+            else ("CAA Source" if source_url else "Proposed")
+        )
         ttk.Label(frame, text=label, font=("TkDefaultFont", 7), foreground="green").pack(
             anchor=tk.N
         )

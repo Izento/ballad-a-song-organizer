@@ -68,12 +68,8 @@ class TrackIdentity:
         return (
             self.normalized_artist,
             self.normalized_title,
-            tuple(
-                sorted(normalize_text(value) for value in self.contributors)
-            ),
-            tuple(
-                sorted(normalize_text(value) for value in self.qualifiers)
-            ),
+            tuple(sorted(normalize_text(value) for value in self.contributors)),
+            tuple(sorted(normalize_text(value) for value in self.qualifiers)),
             normalize_text(self.version),
         )
 
@@ -132,11 +128,7 @@ def filename_identity_hint(path: str) -> tuple[str, str] | None:
 def _fold(value: str) -> str:
     """Normalize for comparison, treating "Tiesto" and "Tiësto" as one name."""
     decomposed = unicodedata.normalize("NFKD", normalize_text(value))
-    return "".join(
-        character
-        for character in decomposed
-        if not unicodedata.combining(character)
-    )
+    return "".join(character for character in decomposed if not unicodedata.combining(character))
 
 
 def _identity_tokens(value: str) -> set[str]:
@@ -240,21 +232,16 @@ def reconcile_online_version(
             exact_recording_id=recording_id,
         )
     local_title = identity.title
-    local_has_variant = (
-        has_explicit_variant(local_title)
-        or has_instrumental_qualifier(local_title)
-    )
+    local_has_variant = has_explicit_variant(local_title) or has_instrumental_qualifier(local_title)
     qualifiers_match = has_matching_qualifier(local_title, online_title)
     derivative = bool(recording_id and local_has_variant and not qualifiers_match)
     online_has_variant = any(
-        qualifier.is_recording_identity
-        for qualifier in parse_qualifiers(online_title)
+        qualifier.is_recording_identity for qualifier in parse_qualifiers(online_title)
     )
     warning = ""
     if local_has_variant and online_has_variant and not qualifiers_match:
         warning = (
-            "Version qualifier conflicts with AcoustID metadata; "
-            "review the proposed filename."
+            "Version qualifier conflicts with AcoustID metadata; review the proposed filename."
         )
     elif derivative:
         warning = (

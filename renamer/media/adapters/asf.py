@@ -94,6 +94,25 @@ def read_artwork(audio: Any) -> ArtworkDescriptor | None:
     )
 
 
+def _write_attributes(
+    audio: Any,
+    values: Mapping[str, Any],
+    targets: tuple[tuple[str, str], ...],
+    attribute_type: Any,
+    *,
+    first_only: bool = False,
+) -> None:
+    for canonical, target in targets:
+        if canonical not in values:
+            continue
+        entries = value_list(values[canonical])
+        if entries:
+            entries = entries[:1] if first_only else entries
+            audio[target] = [attribute_type(entry) for entry in entries]
+        elif target in audio:
+            del audio[target]
+
+
 def write(
     path: str,
     values: Mapping[str, Any],
@@ -105,30 +124,21 @@ def write(
 
     audio = ASF(path)
     replace_artwork = replace_artwork or image is not None
-    for field in FIELDS:
-        if not field.asf or field.canonical not in values:
-            continue
-        entries = value_list(values[field.canonical])
-        if entries:
-            audio[field.asf] = [
-                ASFUnicodeAttribute(entry)
-                for entry in entries
-            ]
-        elif field.asf in audio:
-            del audio[field.asf]
-    for canonical, target in (
+    field_targets = tuple((field.canonical, field.asf) for field in FIELDS if field.asf)
+    _write_attributes(audio, values, field_targets, ASFUnicodeAttribute)
+    number_targets = (
         ("tracknumber", "WM/TrackNumber"),
         ("tracktotal", "WM/TrackTotal"),
         ("discnumber", "WM/PartOfSet"),
         ("disctotal", "WM/PartOfSetTotal"),
-    ):
-        if canonical not in values:
-            continue
-        entries = value_list(values[canonical])
-        if entries:
-            audio[target] = [ASFUnicodeAttribute(entries[0])]
-        elif target in audio:
-            del audio[target]
+    )
+    _write_attributes(
+        audio,
+        values,
+        number_targets,
+        ASFUnicodeAttribute,
+        first_only=True,
+    )
 
     if replace_artwork:
         audio.pop("WM/Picture", None)

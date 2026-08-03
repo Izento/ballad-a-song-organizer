@@ -29,11 +29,17 @@ class TreeMixin:
     def _rename_tree_spec(self) -> tuple[tuple[str, ...], dict, dict]:
         columns = ("selected", "action", "current", "proposed", "confidence")
         headings = {
-            "selected": "", "action": "Action", "current": "Current filename",
-            "proposed": "Proposed filename", "confidence": "Confidence",
+            "selected": "",
+            "action": "Action",
+            "current": "Current filename",
+            "proposed": "Proposed filename",
+            "confidence": "Confidence",
         }
         widths = {
-            "selected": 26, "action": 82, "current": 440, "proposed": 440,
+            "selected": 26,
+            "action": 82,
+            "current": 440,
+            "proposed": 440,
             "confidence": 72,
         }
         return columns, headings, widths
@@ -41,20 +47,29 @@ class TreeMixin:
     def _tag_tree_spec(self) -> tuple[tuple[str, ...], dict, dict]:
         columns = ("selected", "action", "file", "current", "proposed", "confidence")
         headings = {
-            "selected": "", "action": "Action", "file": "File",
-            "current": "Current tags", "proposed": "Proposed tags",
+            "selected": "",
+            "action": "Action",
+            "file": "File",
+            "current": "Current tags",
+            "proposed": "Proposed tags",
             "confidence": "Confidence",
         }
         widths = {
-            "selected": 26, "action": 82, "file": 170, "current": 350,
-            "proposed": 350, "confidence": 72,
+            "selected": 26,
+            "action": 82,
+            "file": 170,
+            "current": 350,
+            "proposed": 350,
+            "confidence": 72,
         }
         return columns, headings, widths
 
     def _readonly_tree_spec(self) -> tuple[tuple[str, ...], dict, dict]:
         columns = ("action", "file", "details", "confidence")
         headings = {
-            "action": "Action", "file": "File", "details": "Details",
+            "action": "Action",
+            "file": "File",
+            "details": "Details",
             "confidence": "Confidence",
         }
         widths = {"action": 140, "file": 350, "details": 420, "confidence": 72}
@@ -94,22 +109,20 @@ class TreeMixin:
             tree.heading(
                 column,
                 text=headings[column],
-                command=lambda name=key, value=column: self._sort_tree_column(
-                    name, value
-                ),
+                command=lambda name=key, value=column: self._sort_tree_column(name, value),
             )
             fixed = column in _FIXED_TREE_COLUMNS
             tree.column(
-                column, width=widths[column],
-                minwidth=widths[column] if fixed else 180, stretch=not fixed,
+                column,
+                width=widths[column],
+                minwidth=widths[column] if fixed else 180,
+                stretch=not fixed,
                 anchor=tk.CENTER if column in {"selected", "confidence"} else tk.W,
             )
 
     def _configure_tree_tags(self, tree) -> None:
         for level, (background, foreground) in _CONFIDENCE_ROW_STYLES.items():
-            tree.tag_configure(
-                f"conf-{level}", background=background, foreground=foreground
-            )
+            tree.tag_configure(f"conf-{level}", background=background, foreground=foreground)
 
     def _add_tree_scrollbars(self, frame: ttk.Frame, tree) -> None:
         vertical = ttk.Scrollbar(frame, orient=tk.VERTICAL, command=tree.yview)
@@ -121,9 +134,7 @@ class TreeMixin:
 
     def _bind_tree_events(self, tree, key: str) -> None:
         tree.bind("<Button-1>", lambda event, name=key: self._handle_tree_click(name, event))
-        tree.bind(
-            "<<TreeviewSelect>>", lambda event, name=key: self._on_tree_select(name, event)
-        )
+        tree.bind("<<TreeviewSelect>>", lambda event, name=key: self._on_tree_select(name, event))
         tree.bind(
             "<Double-Button-1>",
             lambda event, name=key: self._handle_tree_double_click(name, event),
@@ -149,7 +160,8 @@ class TreeMixin:
         tree = self.trees[tree_name]
         reverse = self.session.sort_state.get((tree_name, column), False)
         children = sorted(
-            tree.get_children(""), key=lambda iid: tree.set(iid, column).casefold(),
+            tree.get_children(""),
+            key=lambda iid: tree.set(iid, column).casefold(),
             reverse=reverse,
         )
         for index, iid in enumerate(children):
@@ -160,31 +172,44 @@ class TreeMixin:
     def _set_sort_heading(self, tree, tree_name: str, column: str, reverse: bool) -> None:
         arrow = "▼" if reverse else "▲"
         for other_column, label in self._tree_headings.get(tree_name, {}).items():
-            tree.heading(
-                other_column, text=f"{label} {arrow}" if other_column == column else label
-            )
+            tree.heading(other_column, text=f"{label} {arrow}" if other_column == column else label)
 
     def _populate_plan(self, plan: ReviewPlan) -> None:
         self._clear_trees()
         for row in plan_rows(plan):
             if row.is_change:
                 self._insert_change_row(
-                    row.tree, row.item_id, row.action, row.path, row.current,
-                    row.proposed, row.confidence,
+                    row.tree,
+                    row.item_id,
+                    row.action,
+                    row.path,
+                    row.current,
+                    row.proposed,
+                    row.confidence,
                 )
             else:
                 self._insert_row(
-                    row.tree, row.item_id, row.action, row.path, row.current,
+                    row.tree,
+                    row.item_id,
+                    row.action,
+                    row.path,
+                    row.current,
                     row.confidence,
                 )
 
     def _insert_row(
-        self, tree_name: str, item_id: str, action: str, path: str,
-        summary: str, confidence: str,
+        self,
+        tree_name: str,
+        item_id: str,
+        action: str,
+        path: str,
+        *details: str,
     ) -> None:
+        summary, confidence = details
         tree = self.trees[tree_name]
         row = tree.insert(
-            "", tk.END,
+            "",
+            tk.END,
             values=(action, Path(path).name if path else "", summary, confidence),
             tags=_confidence_row_tags(confidence),
         )
@@ -192,9 +217,14 @@ class TreeMixin:
         self.session.row_paths[(tree_name, row)] = path
 
     def _insert_change_row(
-        self, tree_name: str, item_id: str, action: str, path: str,
-        current: str, proposed: str, confidence: str,
+        self,
+        tree_name: str,
+        item_id: str,
+        action: str,
+        path: str,
+        *details: str,
     ) -> None:
+        current, proposed, confidence = details
         tree = self.trees[tree_name]
         values = ["☐", action]
         if tree_name == "tags":

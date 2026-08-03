@@ -28,18 +28,12 @@ def _track_values(track: TrackInfo) -> dict[str, str]:
         return {
             "artist": normalize_title_text(track.game),
             "title": normalize_title_text(track.title),
-            "contributors": ", ".join(
-                normalize_title_text(remixer)
-                for remixer in track.remixers
-            ),
+            "contributors": ", ".join(normalize_title_text(remixer) for remixer in track.remixers),
         }
     return {
         "artist": track.artist,
         "title": normalize_title_text(track.title),
-        "contributors": ", ".join(
-            normalize_title_text(feature)
-            for feature in track.feat_artists
-        ),
+        "contributors": ", ".join(normalize_title_text(feature) for feature in track.feat_artists),
     }
 
 
@@ -50,10 +44,9 @@ def _tag_filename_conflict(path: str, track: TrackInfo) -> str | None:
     if hint is None or not track.artist or not track.title:
         return None
     filename_artist, filename_title = hint
-    if (
-        normalize_text(filename_artist) == normalize_text(track.artist)
-        and normalize_text(filename_title) == normalize_text(track.title)
-    ):
+    if normalize_text(filename_artist) == normalize_text(track.artist) and normalize_text(
+        filename_title
+    ) == normalize_text(track.title):
         return None
     return (
         "Filename identity "
@@ -129,15 +122,10 @@ def _proposal_for_track(
     if track.version_warning:
         warnings.append(track.version_warning)
     if online_conflict:
-        warnings.append(
-            "Embedded tags conflicted with the filename and were not used."
-        )
+        warnings.append("Embedded tags conflicted with the filename and were not used.")
     reason = f"Normalized using {track.strategy or 'automatic'} evidence."
     if track.strategy == "acoustid" and track.acoustid_recording_id:
-        reason += (
-            f" AcoustID recording {track.acoustid_recording_id} "
-            "was retained as evidence."
-        )
+        reason += f" AcoustID recording {track.acoustid_recording_id} was retained as evidence."
     new_path = os.path.join(os.path.dirname(path), new_name)
     return RenameProposal(
         id=proposal_id("rename", path, new_path),
@@ -189,9 +177,7 @@ def _plan_extracted_track(
         )
         if track_error:
             category = (
-                "identity-conflict"
-                if "automatic rename blocked" in track_error
-                else "rename"
+                "identity-conflict" if "automatic rename blocked" in track_error else "rename"
             )
             return None, issue(canonical_path(path), category, track_error)
         return _proposal_for_track(
@@ -204,7 +190,8 @@ def _plan_extracted_track(
         return None, issue(canonical_path(path), "rename", str(exc))
 
 
-def plan_renames(
+# Preserve positional arguments supported by this public planner API.
+def plan_renames(  # noqa: PLR0917
     folder_path: str,
     strategy: str | None = None,
     recursive: bool = True,

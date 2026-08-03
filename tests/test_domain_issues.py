@@ -4,9 +4,7 @@ from renamer.domain.issues import IssueCode, ReviewIssue
 
 
 def test_issue_policy_is_independent_from_gui_wording():
-    collision = ReviewIssue.from_message(
-        "Destination collides with another proposal."
-    )
+    collision = ReviewIssue.from_message("Destination collides with another proposal.")
     conflict = ReviewIssue.from_message(
         "Version qualifier conflicts with AcoustID metadata; review it."
     )

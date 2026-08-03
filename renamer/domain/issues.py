@@ -38,27 +38,23 @@ _CATEGORY_CODES = {
     "metadata-enrichment": IssueCode.METADATA_ENRICHMENT,
     "duplicate-audit": IssueCode.DUPLICATE_AUDIT,
 }
+_MESSAGE_CODES = (
+    ("Identity mismatch:", IssueCode.IDENTITY_CONFLICT),
+    ("Placeholder identity:", IssueCode.PLACEHOLDER_IDENTITY),
+    ("Protected local identity:", IssueCode.PROTECTED_IDENTITY),
+    ("Destination collides with another proposal.", IssueCode.DESTINATION_COLLISION),
+    ("Destination already exists:", IssueCode.DESTINATION_EXISTS),
+    ("Version qualifier conflicts with AcoustID metadata;", IssueCode.VERSION_CONFLICT),
+    ("Local derivative:", IssueCode.LOCAL_DERIVATIVE),
+    ("Identity came from ", IssueCode.ONLINE_EVIDENCE),
+    ("Audio match score:", IssueCode.AUDIO_SCORE),
+)
 
 
 def issue_code_for_message(message: str) -> IssueCode:
-    if message.startswith("Identity mismatch:"):
-        return IssueCode.IDENTITY_CONFLICT
-    if message.startswith("Placeholder identity:"):
-        return IssueCode.PLACEHOLDER_IDENTITY
-    if message.startswith("Protected local identity:"):
-        return IssueCode.PROTECTED_IDENTITY
-    if message.startswith("Destination collides with another proposal."):
-        return IssueCode.DESTINATION_COLLISION
-    if message.startswith("Destination already exists:"):
-        return IssueCode.DESTINATION_EXISTS
-    if message.startswith("Version qualifier conflicts with AcoustID metadata;"):
-        return IssueCode.VERSION_CONFLICT
-    if message.startswith("Local derivative:"):
-        return IssueCode.LOCAL_DERIVATIVE
-    if message.startswith("Identity came from "):
-        return IssueCode.ONLINE_EVIDENCE
-    if message.startswith("Audio match score:"):
-        return IssueCode.AUDIO_SCORE
+    for prefix, code in _MESSAGE_CODES:
+        if message.startswith(prefix):
+            return code
     return IssueCode.GENERIC
 
 
@@ -114,11 +110,7 @@ class ReviewIssue(Mapping[str, Any]):
             else _CATEGORY_CODES.get(category, issue_code_for_message(message))
         )
         raw_severity = value.get("severity")
-        severity = (
-            IssueSeverity(str(raw_severity))
-            if raw_severity
-            else severity_for_code(code)
-        )
+        severity = IssueSeverity(str(raw_severity)) if raw_severity else severity_for_code(code)
         return cls(
             code=code,
             message=message,
@@ -175,6 +167,9 @@ class ReviewIssue(Mapping[str, Any]):
                 other.category,
             )
         return isinstance(other, Mapping) and self.to_dict() == dict(other)
+
+    def __hash__(self) -> int:
+        return hash((self.code, self.message, self.severity, self.path, self.category))
 
 
 def proposal_issues(messages: tuple[str, ...] | list[str]) -> tuple[ReviewIssue, ...]:

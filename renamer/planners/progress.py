@@ -21,9 +21,7 @@ def emit(
 
 
 def issue(path: str, category: str, message: str) -> ReviewIssue:
-    return ReviewIssue.from_dict(
-        {"path": path, "category": category, "message": message}
-    )
+    return ReviewIssue.from_dict({"path": path, "category": category, "message": message})
 
 
 __all__ = ["ProgressCallback", "emit", "issue"]

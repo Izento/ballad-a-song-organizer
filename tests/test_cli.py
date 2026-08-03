@@ -92,8 +92,10 @@ def test_enrich_passes_explicit_cover_art_preference(tmp_path, monkeypatch, cli_
     monkeypatch.setattr(
         enrich,
         "analyze_folder",
-        lambda *_args, **kwargs: observed.update(kwargs)
-        or SimpleNamespace(rename_proposals=(), tag_proposals=(), issues=()),
+        lambda *_args, **kwargs: (
+            observed.update(kwargs)
+            or SimpleNamespace(rename_proposals=(), tag_proposals=(), issues=())
+        ),
     )
     args = Namespace(
         folder=str(tmp_path),

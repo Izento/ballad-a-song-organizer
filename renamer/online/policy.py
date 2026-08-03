@@ -46,9 +46,7 @@ class RateLimiter:
 
     def wait(self) -> None:
         with self._lock:
-            remaining = self.interval - (
-                time.monotonic() - self._last_request
-            )
+            remaining = self.interval - (time.monotonic() - self._last_request)
             if remaining > 0:
                 time.sleep(remaining)
             self._last_request = time.monotonic()

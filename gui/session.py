@@ -47,15 +47,9 @@ class ReviewSession:
         """Remember successful groups and remove their selected action IDs."""
         if self.plan is None:
             return
-        successful_ids = {
-            result.proposal_id
-            for result in results
-            if result.status == "succeeded"
-        }
+        successful_ids = {result.proposal_id for result in results if result.status == "succeeded"}
         self.applied_group_ids.update(
-            item.decision_group_id
-            for item in action_items(self.plan)
-            if item.id in successful_ids
+            item.decision_group_id for item in action_items(self.plan) if item.id in successful_ids
         )
         self.selected_ids.difference_update(successful_ids)
 

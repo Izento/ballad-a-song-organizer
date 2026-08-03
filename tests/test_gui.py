@@ -14,9 +14,7 @@ from renamer.review_service import analyze_folder
 def test_history_timestamps_are_converted_to_local_time():
     timestamp = "2026-07-13T07:05:10.468747+00:00"
 
-    expected = datetime.fromisoformat(timestamp).astimezone().strftime(
-        "%Y-%m-%d %I:%M:%S %p %Z"
-    )
+    expected = datetime.fromisoformat(timestamp).astimezone().strftime("%Y-%m-%d %I:%M:%S %p %Z")
 
     assert format_local_timestamp(timestamp) == expected
 

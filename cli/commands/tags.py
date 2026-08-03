@@ -48,10 +48,10 @@ def _process_folder(
     for item in proposals[:4]:
         output.print(
             f"  [dim]{item.path}[/dim] "
-            f'{item.before.get("title", "")} → {item.after.get("title", "")}'
+            f"{item.before.get('title', '')} → {item.after.get('title', '')}"
         )
     for issue in issues[:3]:
-        output.print(f'  [red]ERROR[/red] {issue["path"]}: {issue["message"]}')
+        output.print(f"  [red]ERROR[/red] {issue['path']}: {issue['message']}")
     return len(proposals), succeeded, problems, file_count
 
 

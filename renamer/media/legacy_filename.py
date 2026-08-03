@@ -52,10 +52,7 @@ def _clean_names(values: list[str]) -> list[str]:
 
 
 def _is_version_label(text: str) -> bool:
-    return bool(
-        _OCREMIX_LABEL_RE.search(text or "")
-        or _VERSION_LABEL_RE.search(text or "")
-    )
+    return bool(_OCREMIX_LABEL_RE.search(text or "") or _VERSION_LABEL_RE.search(text or ""))
 
 
 def parse_stem(stem: str) -> dict | None:

@@ -44,8 +44,6 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
     name="Ballad",
     icon=str(icon),
@@ -54,11 +52,13 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    exclude_binaries=True,
 )
 coll = COLLECT(
     exe,
     a.binaries,
     a.datas,
+    a.zipfiles,
     strip=False,
     upx=False,
     name="Ballad",

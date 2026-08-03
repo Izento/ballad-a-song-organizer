@@ -84,7 +84,8 @@ class EventControllerMixin:
     def _analysis_summary(self, plan, actions, unresolved: int) -> str:
         duplicate_summary = (
             f"{len(plan.duplicate_findings)} duplicate findings."
-            if self.session.last_run_checked_duplicates else "duplicate check skipped."
+            if self.session.last_run_checked_duplicates
+            else "duplicate check skipped."
         )
         return (
             f"Analysis complete: {len(actions)} proposed change(s) across "
@@ -133,21 +134,29 @@ class EventControllerMixin:
         succeeded = sum(result.status == "succeeded" for result in results)
         blocked = sum(result.status == "blocked" for result in results)
         failed = sum(result.status in {"failed", "stale"} for result in results)
-        return f"Apply complete: {succeeded} succeeded, {blocked} blocked, {failed} failed.", blocked, failed
+        return (
+            f"Apply complete: {succeeded} succeeded, {blocked} blocked, {failed} failed.",
+            blocked,
+            failed,
+        )
 
     def _insert_apply_errors(self, results) -> None:
         for result in results:
             if result.status in {"failed", "stale", "blocked"}:
                 self._insert_row(
-                    "errors", f"apply-{result.proposal_id}", result.status,
-                    result.path, result.message, "error",
+                    "errors",
+                    f"apply-{result.proposal_id}",
+                    result.status,
+                    result.path,
+                    result.message,
+                    "error",
                 )
 
     def _show_apply_issues(self, summary: str, blocked: int, failed: int) -> None:
         detail = (
             "Blocked actions were skipped; the successful actions do not need to be undone. "
-            if blocked and not failed else
-            "Use Undo latest to restore successful actions when a mutation failed. "
+            if blocked and not failed
+            else "Use Undo latest to restore successful actions when a mutation failed. "
         )
         messagebox.showwarning(
             "Apply finished with issues", f"{summary} {detail}Open the error tab for details."

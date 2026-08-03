@@ -212,9 +212,7 @@ def test_metadata_enrichment_extracts_feat_from_enriched_title(tmp_path, monkeyp
     )
 
     assert issues == []
-    assert renames[0].new_path.endswith(
-        "Alexander Lewis - So Nice (feat. KRANE).mp3"
-    )
+    assert renames[0].new_path.endswith("Alexander Lewis - So Nice (feat. KRANE).mp3")
 
 
 def test_metadata_enrichment_deduplicates_stylized_feature_names(
@@ -262,9 +260,7 @@ def test_metadata_enrichment_deduplicates_stylized_feature_names(
 
     assert issues == []
     assert len(renames) == 1
-    assert renames[0].new_path.endswith(
-        "Alexander Lewis - So Nice (feat. KRANE).mp3"
-    )
+    assert renames[0].new_path.endswith("Alexander Lewis - So Nice (feat. KRANE).mp3")
     assert renames[0].new_path.count("Krne") == 0
     assert renames[0].new_path.count("KRANE") == 1
 
@@ -313,9 +309,7 @@ def test_metadata_enrichment_preserves_local_feature_when_provider_omits_it(
     )
 
     assert issues == []
-    assert renames[0].new_path.endswith(
-        "Paul van Dyk - New York City (feat. Ashley).mp3"
-    )
+    assert renames[0].new_path.endswith("Paul van Dyk - New York City (feat. Ashley).mp3")
     assert tags[0].after["title"] == "New York City (feat. Ashley)"
 
 
@@ -363,9 +357,7 @@ def test_metadata_enrichment_preserves_explicit_local_collaboration_layout(
     )
 
     assert issues == []
-    assert renames[0].new_path.endswith(
-        "Dimitri Vegas & Like Mike - Stampede (feat. DVBBS).mp3"
-    )
+    assert renames[0].new_path.endswith("Dimitri Vegas & Like Mike - Stampede (feat. DVBBS).mp3")
     assert tags[0].after["artist"] == "Dimitri Vegas & Like Mike"
     assert tags[0].after["title"] == "Stampede (feat. DVBBS)"
 
@@ -404,9 +396,7 @@ def test_metadata_enrichment_can_skip_cover_art_downloads(tmp_path, monkeypatch)
     monkeypatch.setattr(
         review_api,
         "download_front_art",
-        lambda *_args: (_ for _ in ()).throw(
-            AssertionError("cover art was downloaded")
-        ),
+        lambda *_args: (_ for _ in ()).throw(AssertionError("cover art was downloaded")),
     )
 
     _renames, tags, _issues = review_api.plan_metadata_enrichment(
@@ -443,7 +433,6 @@ def test_metadata_enrichment_deduplicates_shared_recording_and_artwork(tmp_path)
 
     def artwork_download(release_id):
         artwork_calls.append(release_id)
-        return None
 
     _renames, tags, issues = plan_metadata_enrichment(
         str(tmp_path),
@@ -654,9 +643,7 @@ def test_placeholder_artist_is_hard_blocked(tmp_path, monkeypatch):
     assert not tags[0].apply_eligible
 
 
-def test_placeholder_local_tag_is_blocked_even_without_provider_override(
-    tmp_path, monkeypatch
-):
+def test_placeholder_local_tag_is_blocked_even_without_provider_override(tmp_path, monkeypatch):
     # MusicBrainz can resolve a title without ever asserting an artist name
     # (e.g. a recording with no usable artist credit). When that happens
     # the enriched "after" dict falls back to the file's own tag, which is
@@ -794,10 +781,7 @@ def test_freestyle_identity_cannot_be_silently_replaced(tmp_path, monkeypatch):
         recursive=False,
     )
 
-    assert any(
-        "Protected local identity" in warning
-        for warning in renames[0].warnings
-    )
+    assert any("Protected local identity" in warning for warning in renames[0].warnings)
     assert not renames[0].apply_eligible
     assert not tags[0].apply_eligible
 

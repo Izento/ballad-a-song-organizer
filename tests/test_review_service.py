@@ -23,16 +23,11 @@ def test_rename_analysis_is_read_only(tmp_path):
     assert issues == []
     assert len(proposals) == 1
     assert proposals[0].old_path == str(source)
-    assert proposals[0].new_path.endswith(
-        "Artist - song.mp3"
-    )
+    assert proposals[0].new_path.endswith("Artist - song.mp3")
 
 
 def test_rename_proposal_uses_canonical_filename_identity(tmp_path):
-    source = tmp_path / (
-        "Artist - Song ((feat. Guest)) "
-        "prod. Producer-Djleak.com.mp3"
-    )
+    source = tmp_path / ("Artist - Song ((feat. Guest)) prod. Producer-Djleak.com.mp3")
     source.write_bytes(b"fixture")
 
     proposals, issues = review_api.plan_renames(
@@ -146,14 +141,10 @@ def test_existing_destination_is_marked_for_review(tmp_path):
 
     refreshed = review_api.refresh_rename_readiness([proposal])
 
-    assert refreshed[0].warnings == (
-        f"Destination already exists: {destination}",
-    )
+    assert refreshed[0].warnings == (f"Destination already exists: {destination}",)
 
 
-def test_conflicting_filename_and_tags_block_automatic_rename(
-    tmp_path, monkeypatch
-):
+def test_conflicting_filename_and_tags_block_automatic_rename(tmp_path, monkeypatch):
     source = tmp_path / "Xenosaga - Unknown Title.mp3"
     source.write_bytes(b"fixture")
 
@@ -189,9 +180,7 @@ def test_conflicting_filename_and_tags_block_automatic_rename(
     assert "automatic rename blocked" in issues[0]["message"]
 
 
-def test_online_identity_resolves_conflict_without_auto_selecting(
-    tmp_path, monkeypatch
-):
+def test_online_identity_resolves_conflict_without_auto_selecting(tmp_path, monkeypatch):
     source = tmp_path / "Xenosaga - Unknown Title.mp3"
     source.write_bytes(b"fixture")
     calls = []

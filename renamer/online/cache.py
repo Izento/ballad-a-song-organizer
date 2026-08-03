@@ -8,6 +8,7 @@ import os
 import sqlite3
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -130,16 +131,20 @@ class EnrichmentCache:
         }
 
 
-_default_cache: EnrichmentCache | None = None
+@dataclass
+class _DefaultCacheState:
+    value: EnrichmentCache | None = None
+
+
+_DEFAULT_CACHE = _DefaultCacheState()
 
 
 def enrichment_cache() -> EnrichmentCache:
     """Return the process-wide enrichment cache."""
-    global _default_cache  # pylint: disable=global-statement
     with _LOCK:
-        if _default_cache is None:
-            _default_cache = EnrichmentCache()
-        return _default_cache
+        if _DEFAULT_CACHE.value is None:
+            _DEFAULT_CACHE.value = EnrichmentCache()
+        return _DEFAULT_CACHE.value
 
 
 __all__ = ["EnrichmentCache", "enrichment_cache"]

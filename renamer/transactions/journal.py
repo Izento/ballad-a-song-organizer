@@ -41,9 +41,7 @@ class TransactionJournal:
         atomic_write_json(self.path, self.data)
 
     def event(self, kind: str, **payload) -> None:
-        self.data["events"].append(
-            {"kind": kind, "timestamp": _timestamp(), **payload}
-        )
+        self.data["events"].append({"kind": kind, "timestamp": _timestamp(), **payload})
         self.flush()
 
     def intent(self, kind: str, **payload) -> int:

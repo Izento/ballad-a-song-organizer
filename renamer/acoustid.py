@@ -4,7 +4,8 @@ import json
 import math
 import os
 import threading
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
+from dataclasses import dataclass
 
 from .filename_parser import normalize_text
 from .fingerprint import fingerprint_file_details
@@ -12,10 +13,8 @@ from .online import Provider, ProviderError, RateLimiter, RequestPolicy
 from .runtime import app_paths, atomic_write_json, resolve_fpcalc
 from .track_identity import filename_identity_hint
 
-_CACHE_PATH = str(app_paths()['cache'] / 'acoustid_cache.json')
-_cache: dict | None = None
+_CACHE_PATH = str(app_paths()["cache"] / "acoustid_cache.json")
 _CACHE_LOCK = threading.RLock()
-_CACHE_BATCH_DEPTH = 0
 _REQUEST_POLICY = RequestPolicy(
     provider=Provider.ACOUSTID,
     limiter=RateLimiter(1 / 3),
@@ -25,58 +24,60 @@ MIN_CONFIDENCE = 0.70
 _CACHE_VERSION = 3
 
 
+@dataclass
+class _CacheState:
+    entries: dict | None = None
+    batch_depth: int = 0
+
+
+_CACHE_STATE = _CacheState()
+
+
 def _load_cache() -> dict:
-    global _cache  # noqa: PLW0603  # pylint: disable=global-statement
     with _CACHE_LOCK:
-        if _cache is None:
+        if _CACHE_STATE.entries is None:
             try:
-                with open(_CACHE_PATH, encoding='utf-8') as fh:
-                    _cache = json.load(fh)
+                with open(_CACHE_PATH, encoding="utf-8") as fh:
+                    _CACHE_STATE.entries = json.load(fh)
             except (FileNotFoundError, json.JSONDecodeError):
-                _cache = {}
-    return _cache
+                _CACHE_STATE.entries = {}
+        return _CACHE_STATE.entries
 
 
 def _save_cache() -> None:
     with _CACHE_LOCK:
-        if _cache is None:
+        if _CACHE_STATE.entries is None:
             return
-        snapshot = dict(_cache)
-    try:
-        atomic_write_json(app_paths()['cache'] / 'acoustid_cache.json', snapshot)
-    except OSError:
-        pass
+        snapshot = dict(_CACHE_STATE.entries)
+    with suppress(OSError):
+        atomic_write_json(app_paths()["cache"] / "acoustid_cache.json", snapshot)
 
 
 @contextmanager
 def cache_write_batch():
     """Persist AcoustID cache once after a concurrent batch completes."""
-    global _CACHE_BATCH_DEPTH  # pylint: disable=global-statement
     with _CACHE_LOCK:
-        _CACHE_BATCH_DEPTH += 1
+        _CACHE_STATE.batch_depth += 1
     try:
         yield
     finally:
         with _CACHE_LOCK:
-            _CACHE_BATCH_DEPTH -= 1
-            flush = _CACHE_BATCH_DEPTH == 0
+            _CACHE_STATE.batch_depth -= 1
+            flush = _CACHE_STATE.batch_depth == 0
         if flush:
             _save_cache()
 
 
 def _cache_should_flush() -> bool:
     with _CACHE_LOCK:
-        return _CACHE_BATCH_DEPTH == 0
+        return _CACHE_STATE.batch_depth == 0
 
 
 def _file_key(path: str) -> str:
     """Stable cache key: path + mtime + size. Invalidates if file is modified."""
     try:
         s = os.stat(path)
-        return (
-            f"v{_CACHE_VERSION}|{os.path.abspath(path)}|"
-            f"{s.st_mtime_ns}|{s.st_size}|{s.st_ino}"
-        )
+        return f"v{_CACHE_VERSION}|{os.path.abspath(path)}|{s.st_mtime_ns}|{s.st_size}|{s.st_ino}"
     except OSError:
         return f"v{_CACHE_VERSION}|{path}"
 
@@ -94,9 +95,7 @@ def _identity_similarity(
         score += 1
     if hint_title == candidate_title:
         score += 3
-    elif hint_title and (
-        hint_title in candidate_title or candidate_title in hint_title
-    ):
+    elif hint_title and (hint_title in candidate_title or candidate_title in hint_title):
         score += 2
     return score
 
@@ -112,10 +111,7 @@ def _recording_artist(recording: dict) -> str | None:
     artists = recording.get("artists") or ()
     if not artists:
         return None
-    return "".join(
-        artist.get("name", "") + artist.get("joinphrase", "")
-        for artist in artists
-    )
+    return "".join(artist.get("name", "") + artist.get("joinphrase", "") for artist in artists)
 
 
 def _select_recording(response: dict, path: str) -> tuple[float, dict] | None:
@@ -161,15 +157,10 @@ def _select_recording(response: dict, path: str) -> tuple[float, dict] | None:
             )
             for result in top_results
             for recording in result.get("recordings", ())
-            if (title := recording.get("title"))
-            and (artist := _recording_artist(recording))
+            if (title := recording.get("title")) and (artist := _recording_artist(recording))
         ]
         if recordings:
-            exact_title_matches = [
-                recording
-                for recording in recordings
-                if recording[2]
-            ]
+            exact_title_matches = [recording for recording in recordings if recording[2]]
             choices = exact_title_matches or recordings
             _, _, _, recording = max(choices, key=lambda value: value[:2])
             return score, recording
@@ -197,7 +188,7 @@ def _lookup_result(
             api_key,
             fingerprint,
             duration,
-            meta=['recordings', 'sources'],
+            meta=["recordings", "sources"],
         ),
         transient_errors=(
             acoustid.WebServiceError,
@@ -206,9 +197,7 @@ def _lookup_result(
         ),
     )
     if response.get("status") != "ok":
-        raise acoustid.WebServiceError(
-            f"AcoustID response status: {response.get('status')}"
-        )
+        raise acoustid.WebServiceError(f"AcoustID response status: {response.get('status')}")
     selected = _select_recording(response, path)
     if selected is None:
         return True, None
@@ -241,9 +230,7 @@ def lookup(path: str, api_key: str) -> dict | None:
     try:
         import acoustid
     except ImportError as exc:
-        raise RuntimeError(
-            'pyacoustid is not installed. Run: uv pip install pyacoustid'
-        ) from exc
+        raise RuntimeError("pyacoustid is not installed. Run: uv pip install pyacoustid") from exc
     if not resolve_fpcalc():
         return None
     try:
@@ -287,11 +274,11 @@ def _parse_result(
     feat_artists = feat_from_artist + [f for f in feat_from_title if f.lower() not in seen]
 
     result = {
-        'artist': clean_artist.strip(),
-        'title': clean_title.strip(),
-        'feat_artists': feat_artists,
-        'score': round(score, 3),
+        "artist": clean_artist.strip(),
+        "title": clean_title.strip(),
+        "feat_artists": feat_artists,
+        "score": round(score, 3),
     }
     if recording_id:
-        result['recording_id'] = recording_id
+        result["recording_id"] = recording_id
     return result

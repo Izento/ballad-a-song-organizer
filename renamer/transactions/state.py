@@ -58,9 +58,7 @@ class SongTransaction:
     def transition(self, state: TransactionState) -> SongTransaction:
         allowed = _TRANSITIONS.get(self.state, set())
         if state not in allowed:
-            raise ValueError(
-                f"Illegal transaction transition: {self.state} -> {state}"
-            )
+            raise ValueError(f"Illegal transaction transition: {self.state} -> {state}")
         return replace(self, state=state)
 
 

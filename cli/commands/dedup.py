@@ -39,8 +39,7 @@ def run(args: Namespace, output: Output) -> int:
             totals[key] += summary.get(key, 0)
         for finding in summary.get("findings", [])[:10]:
             output.print(
-                f"  [{finding.classification}] "
-                f"{finding.paths[0]} ({len(finding.paths)} files)"
+                f"  [{finding.classification}] {finding.paths[0]} ({len(finding.paths)} files)"
             )
 
     output.print(

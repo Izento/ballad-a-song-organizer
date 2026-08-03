@@ -53,7 +53,8 @@ class ContextMenuMixin:
             return
         menu.add_separator()
         label = (
-            "Ignore this match in future" if len(proposals) == 1
+            "Ignore this match in future"
+            if len(proposals) == 1
             else f"Ignore {len(proposals)} selected matches in future"
         )
         menu.add_command(label=label, command=lambda: self._quarantine_proposals(proposals))
@@ -75,7 +76,9 @@ class ContextMenuMixin:
     def _open_in_file_explorer(self, path: str) -> None:
         target = Path(path)
         if not target.is_file():
-            messagebox.showwarning("File unavailable", f"This file is no longer available:\n{target}")
+            messagebox.showwarning(
+                "File unavailable", f"This file is no longer available:\n{target}"
+            )
             return
         try:
             self._launch_file_explorer(target)
@@ -94,7 +97,9 @@ class ContextMenuMixin:
     def _open_with_default_app(self, path: str) -> None:
         target = Path(path)
         if not target.is_file():
-            messagebox.showwarning("File unavailable", f"This file is no longer available:\n{target}")
+            messagebox.showwarning(
+                "File unavailable", f"This file is no longer available:\n{target}"
+            )
             return
         try:
             if os.name == "nt":

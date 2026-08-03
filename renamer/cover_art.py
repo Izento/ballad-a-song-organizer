@@ -56,6 +56,7 @@ def download_front_art(
 
     source_url = f"https://coverartarchive.org/release/{release_id}/front-500"
     request = Request(source_url, headers={"User-Agent": "Ballad/1.0"})
+
     def fetch() -> tuple[bytes, str | None]:
         with urlopen(request, timeout=timeout) as response:  # noqa: S310
             content_length = response.headers.get("Content-Length")

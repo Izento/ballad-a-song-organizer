@@ -118,11 +118,7 @@ def write(
         audio.tags.pop("covr", None)
     if image:
         data, mime_type = image
-        image_format = (
-            MP4Cover.FORMAT_PNG
-            if mime_type == "image/png"
-            else MP4Cover.FORMAT_JPEG
-        )
+        image_format = MP4Cover.FORMAT_PNG if mime_type == "image/png" else MP4Cover.FORMAT_JPEG
         audio.tags["covr"] = [MP4Cover(data, imageformat=image_format)]
     audio.save()
 

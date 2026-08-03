@@ -78,18 +78,12 @@ CANONICAL_FIELD_NAMES = frozenset(
         "disctotal",
     }
 )
-MULTI_VALUE_FIELDS = frozenset(
-    field.canonical for field in FIELDS if field.multi
-)
+MULTI_VALUE_FIELDS = frozenset(field.canonical for field in FIELDS if field.multi)
 
 
 def expected_metadata(values: Mapping[str, Any]) -> CanonicalMetadata:
     return CanonicalMetadata(
-        {
-            key: value
-            for key, value in values.items()
-            if key in CANONICAL_FIELD_NAMES
-        }
+        {key: value for key, value in values.items() if key in CANONICAL_FIELD_NAMES}
     )
 
 
@@ -101,11 +95,7 @@ def value_list(value: Any, *, split_slash: bool = False) -> list[str]:
     else:
         raw = [str(value)]
     if split_slash:
-        raw = [
-            part
-            for item in raw
-            for part in item.split("/")
-        ]
+        raw = [part for item in raw for part in item.split("/")]
     return [item.strip() for item in raw if item.strip()]
 
 
@@ -134,14 +124,8 @@ def metadata_matches(
     for key, value in expected.items():
         actual = current.get(key, "")
         if key in MULTI_VALUE_FIELDS:
-            expected_values = {
-                item.casefold()
-                for item in value_list(value, split_slash=True)
-            }
-            actual_values = {
-                item.casefold()
-                for item in value_list(actual, split_slash=True)
-            }
+            expected_values = {item.casefold() for item in value_list(value, split_slash=True)}
+            actual_values = {item.casefold() for item in value_list(actual, split_slash=True)}
             if expected_values != actual_values:
                 return False
         elif scalar_text(actual) != scalar_text(value):

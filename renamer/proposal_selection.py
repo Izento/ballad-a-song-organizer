@@ -16,11 +16,7 @@ def requires_review(item) -> bool:
 
 
 def is_high_confidence_action(item) -> bool:
-    return (
-        item.confidence == "high"
-        and item.apply_eligible
-        and not item.requires_review
-    )
+    return item.confidence == "high" and item.apply_eligible and not item.requires_review
 
 
 def grouped_action_ids(plan: ReviewPlan) -> dict[str, set[str]]:
@@ -37,10 +33,7 @@ def ready_ids(plan: ReviewPlan) -> set[str]:
     return {
         item.id
         for items in items_by_group.values()
-        if all(
-            item.apply_eligible and not item.requires_review
-            for item in items
-        )
+        if all(item.apply_eligible and not item.requires_review for item in items)
         for item in items
     }
 
@@ -59,25 +52,13 @@ def expand_group_selection(
     """
     groups = grouped_action_ids(plan)
     selected = set(selected_ids)
-    selected_groups = {
-        group_id
-        for group_id, item_ids in groups.items()
-        if selected & item_ids
-    }
+    selected_groups = {group_id for group_id, item_ids in groups.items() if selected & item_ids}
     allowed_ids = (
-        {
-            item.id
-            for item in action_items(plan)
-            if item.apply_eligible
-        }
+        {item.id for item in action_items(plan) if item.apply_eligible}
         if include_review
         else ready_ids(plan)
     )
-    return {
-        item_id
-        for group_id in selected_groups
-        for item_id in groups[group_id]
-    } & allowed_ids
+    return {item_id for group_id in selected_groups for item_id in groups[group_id]} & allowed_ids
 
 
 def recommended_ids(plan: ReviewPlan) -> set[str]:
@@ -105,8 +86,7 @@ def eligible_ids(items: Iterable, *, include_review: bool = False) -> list[str]:
     return [
         item.id
         for item in items
-        if item.apply_eligible
-        and (include_review or not item.requires_review)
+        if item.apply_eligible and (include_review or not item.requires_review)
     ]
 
 

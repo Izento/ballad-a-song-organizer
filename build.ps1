@@ -67,8 +67,11 @@ try {
     foreach ($kind in $buildKinds) {
         $releasePath = Join-Path $releaseRoot $kind
         $workPath = Join-Path $workRoot $kind
+        if (Test-Path $releasePath) {
+            Remove-Item $releasePath -Recurse -Force
+        }
         & uv run --extra build pyinstaller --noconfirm --clean `
-            --distpath $releasePath --workpath $workPath song_organizer.spec
+            --distpath $releasePath --workpath $workPath ballad.spec
         if ($LASTEXITCODE -ne 0) {
             throw "PyInstaller failed for $kind with exit code $LASTEXITCODE"
         }

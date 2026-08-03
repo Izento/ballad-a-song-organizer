@@ -20,6 +20,7 @@ def plan_tag_updates(
     cancel_event=None,
 ):
     """Plan tag repairs implied by supported filenames."""
+
     def audit_progress(current: int, total: int, path: str) -> None:
         progress("tag-audit", current, total, path)
 

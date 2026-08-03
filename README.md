@@ -142,6 +142,9 @@ update them together only after reviewing a new official Chromaprint release.
 ```powershell
 uv sync --extra test
 uv run pytest
+uv run --extra dev ruff check .
+uv run --extra dev ruff format --check .
+uv run python tools/check_structure.py
 ```
 
 ## Code organization
@@ -149,11 +152,14 @@ uv run pytest
 - `src/ballad` is the public package and entry-point namespace.
 - `renamer/domain` contains immutable metadata, identity, artwork, and issue
   contracts.
-- `renamer/naming`, `renamer/media`, and `renamer/online` own parsing,
-  container adapters, and provider policy.
+- `renamer/filename_parser`, `renamer/filename_builder`, and
+  `renamer/track_identity` own filename parsing, construction, and
+  identity policy; `renamer/media` and `renamer/online` own container
+  adapters and provider policy.
 - `renamer/planners` performs read-only analysis; `renamer/transactions`
   validates, applies, journals, and restores reviewed changes.
-- `cli` and `gui` are thin interfaces over those application services. GUI
+- `cli` and `gui` are thin interfaces over those application services. The
+  GUI composes focused session, view, controller, dialog, and widget modules;
   workers and presentation models do not depend on Tk widgets.
 
 Application state, cache files, build outputs, virtual environments, API keys,

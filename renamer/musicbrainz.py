@@ -53,8 +53,7 @@ class EnrichmentResult:
     provenance: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(
-            self, "values", CanonicalMetadata.coerce(self.values))
+        object.__setattr__(self, "values", CanonicalMetadata.coerce(self.values))
         object.__setattr__(self, "confidence", Confidence(self.confidence))
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "provenance", tuple(self.provenance))
@@ -103,11 +102,11 @@ def _populate_album_track_cache(
     mb = _mb()
     try:
         _rate_limit()
-        query_kwargs = {'release': album, 'limit': 3}
+        query_kwargs = {"release": album, "limit": 3}
         if artist_hint:
-            query_kwargs['artist'] = artist_hint
+            query_kwargs["artist"] = artist_hint
         result = mb.search_releases(**query_kwargs)
-        releases = result.get('release-list', [])
+        releases = result.get("release-list", [])
         if not releases:
             _RELEASE_CACHE[cache_key] = []
             return
@@ -121,12 +120,12 @@ def _populate_album_track_cache(
         _rate_limit()
         release = mb.get_release_by_id(
             candidate.release_id,
-            includes=['recordings'],
+            includes=["recordings"],
         )
         _RELEASE_CACHE[cache_key] = [
             track
-            for medium in release['release'].get('medium-list', [])
-            for track in medium.get('track-list', [])
+            for medium in release["release"].get("medium-list", [])
+            for track in medium.get("track-list", [])
         ]
     except (mb.MusicBrainzError, KeyError, TypeError, ValueError):
         _RELEASE_CACHE[cache_key] = []
@@ -138,20 +137,24 @@ def _track_by_number(
     artist_hint: str,
 ) -> dict | None:
     for track in tracks:
-        if int(track.get('position', -1)) == track_num:
-            rec = track.get('recording', {})
-            artist_credits = rec.get('artist-credit', [])
+        if int(track.get("position", -1)) == track_num:
+            rec = track.get("recording", {})
+            artist_credits = rec.get("artist-credit", [])
             artist_name = artist_hint
             if artist_credits and isinstance(artist_credits[0], dict):
-                artist_name = artist_credits[0].get('artist', {}).get(
-                    'name',
-                    artist_hint,
+                artist_name = (
+                    artist_credits[0]
+                    .get("artist", {})
+                    .get(
+                        "name",
+                        artist_hint,
+                    )
                 )
-            return {'artist': artist_name, 'title': rec.get('title', '')}
+            return {"artist": artist_name, "title": rec.get("title", "")}
     return None
 
 
-def lookup_track_by_album(album: str, track_num: int, artist_hint: str = '') -> dict | None:
+def lookup_track_by_album(album: str, track_num: int, artist_hint: str = "") -> dict | None:
     """
     Find a track title by album name and track number.
     Returns {'artist': str, 'title': str} or None if not found.
@@ -186,17 +189,15 @@ def lookup_ocremix_remixers(game: str, song_title: str) -> list[str] | None:
             artist=game,
             limit=5,
         )
-        recordings = result.get('recording-list', [])
+        recordings = result.get("recording-list", [])
 
         for rec in recordings:
-            title = rec.get('title', '')
-            if 'OC ReMix' not in title and song_title.lower() not in title.lower():
+            title = rec.get("title", "")
+            if "OC ReMix" not in title and song_title.lower() not in title.lower():
                 continue
-            artist_credits = rec.get('artist-credit', [])
+            artist_credits = rec.get("artist-credit", [])
             names = [
-                c['artist']['name']
-                for c in artist_credits
-                if isinstance(c, dict) and 'artist' in c
+                c["artist"]["name"] for c in artist_credits if isinstance(c, dict) and "artist" in c
             ]
             if names:
                 return names
@@ -229,10 +230,7 @@ def _feature_relation_names(relations: list | None) -> set[str]:
         if not isinstance(relation, dict):
             continue
         relation_type = str(relation.get("type") or "").casefold()
-        attributes = {
-            str(value).casefold()
-            for value in relation.get("attribute-list", [])
-        }
+        attributes = {str(value).casefold() for value in relation.get("attribute-list", [])}
         is_feature = relation_type in {"vocal", "featured artist"} or bool(
             attributes
             & {
@@ -276,25 +274,18 @@ def _artist_credit_identity(
     primary = credits[0][1]
     relation_features = _feature_relation_names(relations)
     has_relation_features = bool(
-        relation_features
-        & {normalize_text(name) for _credit, name in credits[1:]}
+        relation_features & {normalize_text(name) for _credit, name in credits[1:]}
     )
     features: list[str] = []
 
     def add_feature(name: str) -> None:
-        if normalize_text(name) not in {
-            normalize_text(existing) for existing in features
-        }:
+        if normalize_text(name) not in {normalize_text(existing) for existing in features}:
             features.append(name)
 
-    for index, (credit, name) in enumerate(credits[1:], start=1):
-        previous_joinphrase = str(
-            credits[index - 1][0].get("joinphrase") or ""
-        )
+    for index, (_credit, name) in enumerate(credits[1:], start=1):
+        previous_joinphrase = str(credits[index - 1][0].get("joinphrase") or "")
         normalized_name = normalize_text(name)
-        if normalized_name in relation_features or _FEATURE_JOIN_RE.search(
-            previous_joinphrase
-        ):
+        if normalized_name in relation_features or _FEATURE_JOIN_RE.search(previous_joinphrase):
             add_feature(name)
             continue
         if not previous_joinphrase.strip():
@@ -340,11 +331,14 @@ def _merge_feature_names(*groups: tuple[str, ...]) -> tuple[str, ...]:
         shorter = min(left_squashed, right_squashed, key=len)
         if len(shorter) < 4:
             return False
-        return SequenceMatcher(
-            None,
-            left_squashed,
-            right_squashed,
-        ).ratio() >= 0.86
+        return (
+            SequenceMatcher(
+                None,
+                left_squashed,
+                right_squashed,
+            ).ratio()
+            >= 0.86
+        )
 
     merged: list[str] = []
     for group in groups:
@@ -465,9 +459,7 @@ def _canonical_release_selection(
         return _earliest_release(eligible), (
             "No local release evidence; selected the earliest official non-compilation release.",
         )
-    return None, (
-        "No suitable official canonical release; release-specific metadata was skipped.",
-    )
+    return None, ("No suitable official canonical release; release-specific metadata was skipped.",)
 
 
 def _has_release_evidence(evidence: dict[str, object]) -> bool:
@@ -489,9 +481,7 @@ def _release_ordering(candidate: ReleaseCandidate) -> tuple[int, int, str, str]:
     return (
         candidate.score,
         official + standard_type,
-        "".join(
-            "9" if character.isdigit() else character for character in candidate.date
-        )
+        "".join("9" if character.isdigit() else character for character in candidate.date)
         or "9999-99-99",
         candidate.release_id,
     )
@@ -505,8 +495,7 @@ def _ranked_release_selection(
     warnings: list[str] = []
     tied = [candidate for candidate in ranked if candidate.score == best.score]
     if len(tied) > 1 and best.score > 0:
-        warnings.append(
-            "Multiple releases match local evidence; selected the earliest.")
+        warnings.append("Multiple releases match local evidence; selected the earliest.")
         best = _earliest_release(tied)
     elif best.score <= 0:
         return _canonical_release_selection(candidates)
@@ -519,11 +508,7 @@ def select_release(
 ) -> tuple[ReleaseCandidate | None, tuple[str, ...]]:
     """Choose a canonical release conservatively from recording appearances."""
     evidence = local_evidence or {}
-    candidates = [
-        _candidate_score(release, evidence)
-        for release in releases
-        if release.get("id")
-    ]
+    candidates = [_candidate_score(release, evidence) for release in releases if release.get("id")]
     if not candidates:
         return None, ("MusicBrainz returned no release candidates.",)
     if not _has_release_evidence(evidence):
@@ -651,8 +636,7 @@ def _metadata_from_release(
     if label_info:
         first = label_info[0]
         label = first.get("label") or {}
-        values["label"] = label.get(
-            "name", "") if isinstance(label, dict) else ""
+        values["label"] = label.get("name", "") if isinstance(label, dict) else ""
         values["catalog_number"] = first.get("catalog-number", "")
     matched = _release_track(release, recording_id)
     if matched is not None:
@@ -747,9 +731,7 @@ def enrich_recording(
         recording_id=recording_id,
         values=values,
         release_id=release.release_id if release else "",
-        release_group_id=str(
-            (detailed_release.get("release-group") or {}).get("id") or ""
-        ),
+        release_group_id=str((detailed_release.get("release-group") or {}).get("id") or ""),
         confidence=confidence,
         warnings=warnings,
         provenance=(
@@ -774,15 +756,13 @@ def enrich_track(track: TrackInfo) -> TrackInfo:
                 title=result["title"],
                 needs_lookup=False,
             )
-        else:
-            return replace(
-                track,
-                skip_reason=(
-                    f'MusicBrainz: no match for "{track.mb_album}" '
-                    f"track {track.mb_track_num}"
-                ),
-            )
-    elif track.strategy in {"ocremix_old_tags", "ocremix_filename"} and not track.remixers:
+        return replace(
+            track,
+            skip_reason=(
+                f'MusicBrainz: no match for "{track.mb_album}" track {track.mb_track_num}'
+            ),
+        )
+    if track.strategy in {"ocremix_old_tags", "ocremix_filename"} and not track.remixers:
         remixers = lookup_ocremix_remixers(track.game, track.title)
         if remixers:
             return replace(

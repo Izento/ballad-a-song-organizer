@@ -50,9 +50,7 @@ def _with_warning(item: RenameProposal, message: str) -> RenameProposal:
 
 def _without_readiness_warnings(item: RenameProposal) -> RenameProposal:
     review_issues = tuple(
-        issue
-        for issue in item.review_issues
-        if issue.code not in _READINESS_ISSUE_CODES
+        issue for issue in item.review_issues if issue.code not in _READINESS_ISSUE_CODES
     )
     warnings = tuple(issue.message for issue in review_issues)
     if warnings == item.warnings:
@@ -94,9 +92,7 @@ def coordinate_tag_proposals(
     tag_proposals: list[TagProposal],
 ) -> tuple[list[TagProposal], list[ReviewIssue], set[str]]:
     """Align tags with each rename's reviewed final filename."""
-    existing_by_group = {
-        item.decision_group_id: item for item in tag_proposals
-    }
+    existing_by_group = {item.decision_group_id: item for item in tag_proposals}
     coordinated: list[TagProposal] = []
     issues: list[ReviewIssue] = []
     renamed_groups: set[str] = set()
@@ -115,9 +111,7 @@ def coordinate_tag_proposals(
                     {
                         "path": canonical_path(rename.old_path),
                         "category": "tag-sync",
-                        "message": (
-                            f"Tags were not prepared for this rename: {exc}"
-                        ),
+                        "message": (f"Tags were not prepared for this rename: {exc}"),
                     }
                 )
             )
@@ -125,9 +119,7 @@ def coordinate_tag_proposals(
         if proposal is not None:
             coordinated.append(proposal)
     coordinated.extend(
-        item
-        for item in tag_proposals
-        if item.decision_group_id not in renamed_groups
+        item for item in tag_proposals if item.decision_group_id not in renamed_groups
     )
     return coordinated, issues, synchronized_paths
 
@@ -149,10 +141,7 @@ def refresh_rename_readiness(
                 )
     source_keys = {path_key(item.old_path) for item in updated}
     for index, item in enumerate(updated):
-        if (
-            Path(item.new_path).exists()
-            and path_key(item.new_path) not in source_keys
-        ):
+        if Path(item.new_path).exists() and path_key(item.new_path) not in source_keys:
             updated[index] = _with_warning(
                 item,
                 f"Destination already exists: {item.new_path}",

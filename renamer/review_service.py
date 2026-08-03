@@ -46,7 +46,7 @@ def _extract_tracks(
     )
 
 
-def plan_renames(
+def plan_renames(  # noqa: PLR0917
     folder_path,
     strategy=None,
     recursive=True,

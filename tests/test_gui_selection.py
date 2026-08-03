@@ -22,10 +22,7 @@ from renamer.review_models import (
 
 def test_version_qualifier_conflict_requires_manual_review():
     issue = ReviewIssue.from_message(
-
-            "Version qualifier conflicts with AcoustID metadata; "
-            "review the proposed filename."
-
+        "Version qualifier conflicts with AcoustID metadata; review the proposed filename."
     )
     proposal = SimpleNamespace(requires_review=issue.requires_review)
 
@@ -68,12 +65,14 @@ def test_select_all_only_affects_the_active_metadata_tab(
         confidence="high",
         reason="test",
     )
-    app = _bare_app(ReviewPlan.create(
-        str(tmp_path),
-        False,
-        rename_proposals=[rename],
-        tag_proposals=[tag],
-    ))
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[rename],
+            tag_proposals=[tag],
+        )
+    )
     app.session.row_ids = {
         ("renames", "shared-row"): rename.id,
         ("tags", "shared-row"): tag.id,
@@ -119,12 +118,14 @@ def test_checkbox_selects_the_entire_decision_group(tmp_path, fake_tree, fake_st
         confidence="high",
         reason="test",
     )
-    app = _bare_app(ReviewPlan.create(
-        str(tmp_path),
-        False,
-        rename_proposals=[rename],
-        tag_proposals=[tag],
-    ))
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[rename],
+            tag_proposals=[tag],
+        )
+    )
     app.session.row_ids = {
         ("renames", "rename-row"): rename.id,
         ("tags", "tag-row"): tag.id,
@@ -157,15 +158,16 @@ def test_checkbox_can_select_applyable_review_item(tmp_path, fake_tree, fake_sta
         confidence="medium",
         reason="review this match",
         warnings=(
-            "Version qualifier conflicts with AcoustID metadata; "
-            "review the proposed filename.",
+            "Version qualifier conflicts with AcoustID metadata; review the proposed filename.",
         ),
     )
-    app = _bare_app(ReviewPlan.create(
-        str(tmp_path),
-        False,
-        rename_proposals=[review],
-    ))
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[review],
+        )
+    )
     app.session.row_ids = {("renames", "review-row"): review.id}
     app.trees = {
         "renames": fake_tree({"review-row": ("☐",)}),
@@ -212,19 +214,19 @@ def test_select_all_ready_skips_destination_collisions(tmp_path, fake_tree, fake
         reason="test",
         warnings=("Destination already exists: collision.mp3",),
     )
-    app = _bare_app(ReviewPlan.create(
-        str(tmp_path),
-        False,
-        rename_proposals=[safe, review],
-    ))
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[safe, review],
+        )
+    )
     app.session.row_ids = {
         ("renames", "safe-row"): safe.id,
         ("renames", "review-row"): review.id,
     }
     app.trees = {
-        "renames": fake_tree(
-            {"safe-row": ("☐",), "review-row": ("☐",)}
-        ),
+        "renames": fake_tree({"safe-row": ("☐",), "review-row": ("☐",)}),
         "tags": fake_tree({}),
     }
     app.tabs = {"renames": "renames-frame", "tags": "tags-frame"}
@@ -288,11 +290,13 @@ def test_shift_clicking_checkbox_selects_the_range(tmp_path, fake_tree, fake_sta
         rows[f"row-{index}"] = ("☐",)
         row_ids[("renames", f"row-{index}")] = proposal.id
 
-    app = _bare_app(ReviewPlan.create(
-        str(tmp_path),
-        False,
-        rename_proposals=proposals,
-    ))
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=proposals,
+        )
+    )
     app.session.row_ids = row_ids
     app.session.selection_anchors = {"renames": "row-1"}
     app.trees = {
@@ -400,10 +404,7 @@ def test_shared_artwork_guard_removes_only_player_fallbacks(
 
 
 def test_shared_artwork_dialog_caps_the_filename_preview(tmp_path, monkeypatch):
-    artwork = [
-        tmp_path / f"AlbumArt_{index:02d}_Large.jpg"
-        for index in range(12)
-    ]
+    artwork = [tmp_path / f"AlbumArt_{index:02d}_Large.jpg" for index in range(12)]
     for path in artwork:
         path.write_bytes(b"image")
     prompts = []
@@ -480,11 +481,13 @@ def test_select_missing_artwork_includes_medium_confidence_proposals(
             "release_id": "release",
         },
     )
-    app = _bare_app(ReviewPlan.create(
-        str(tmp_path),
-        False,
-        tag_proposals=[proposal],
-    ))
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            tag_proposals=[proposal],
+        )
+    )
     app.session.row_ids = {("tags", "artwork-row"): proposal.id}
     tags = fake_tree({"artwork-row": ("☐",)})
     tags.master = "tags-frame"
@@ -655,11 +658,13 @@ def test_edit_selected_filename_updates_plan_and_selection(
         confidence="high",
         reason="test",
     )
-    app = _bare_app(ReviewPlan.create(
-        str(tmp_path),
-        False,
-        rename_proposals=[proposal],
-    ))
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[proposal],
+        )
+    )
     app.session.selected_ids = {proposal.id}
     app.session.row_ids = {("renames", "rename-row"): proposal.id}
     app.session.row_paths = {}
@@ -712,9 +717,7 @@ def test_progress_events_are_written_to_the_activity_log(
         )
     )
 
-    assert app.activity_log.entries == [
-        "Enrich metadata: 2/7  C:\\Music\\Artist - Song.mp3\n"
-    ]
+    assert app.activity_log.entries == ["Enrich metadata: 2/7  C:\\Music\\Artist - Song.mp3\n"]
     assert app.activity_log.seen == ["end"]
     assert app.activity_log.states == ["normal", "disabled"]
     assert app.status_var.value == "Enrich metadata: 2/7  C:\\Music\\Artist - Song.mp3"
@@ -750,6 +753,4 @@ def test_recovery_override_requires_confirmation_once_per_folder(monkeypatch):
     assert app._confirm_recovery_override(pending, r"F:\Music\Tek No Logical")
 
     assert len(confirmations) == 1
-    assert messages == [
-        "Continuing despite unresolved recovery for this folder."
-    ]
+    assert messages == ["Continuing despite unresolved recovery for this folder."]

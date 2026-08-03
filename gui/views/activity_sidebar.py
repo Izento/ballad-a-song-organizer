@@ -46,9 +46,7 @@ class ActivitySidebarMixin:
         self._build_activity_log(self.activity_tab)
 
     def _add_collapse_button(self, parent: ttk.Frame) -> None:
-        button = ttk.Button(
-            parent, text="Collapse", command=self._toggle_activity_sidebar
-        )
+        button = ttk.Button(parent, text="Collapse", command=self._toggle_activity_sidebar)
         button.pack(side=tk.RIGHT)
         _add_tooltip(button, "Collapse the activity sidebar.")
 
@@ -112,9 +110,7 @@ class ActivitySidebarMixin:
             command=self._toggle_activity_sidebar,
             padding=(2, 2),
         )
-        _add_tooltip(
-            self.activity_show_button, "Show the live activity & review sidebar."
-        )
+        _add_tooltip(self.activity_show_button, "Show the live activity & review sidebar.")
 
     def _toggle_activity_sidebar(self) -> None:
         if self._activity_sidebar_open:

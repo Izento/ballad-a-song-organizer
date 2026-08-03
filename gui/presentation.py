@@ -73,9 +73,7 @@ def proposal_evidence(proposal) -> tuple[dict, dict]:
 
 def tag_display(values: dict[str, object]) -> str:
     return " / ".join(
-        str(value)
-        for value in (values.get("artist", ""), values.get("title", ""))
-        if value
+        str(value) for value in (values.get("artist", ""), values.get("title", "")) if value
     )
 
 

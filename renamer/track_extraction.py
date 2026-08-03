@@ -14,33 +14,33 @@ from .media import read_media
 from .track_identity import reconcile_online_version
 
 AUDIO_EXTENSIONS = {
-    '.mp3',
-    '.flac',
-    '.ogg',
-    '.m4a',
-    '.mp4',
-    '.aac',
-    '.wma',
-    '.wav',
+    ".mp3",
+    ".flac",
+    ".ogg",
+    ".m4a",
+    ".mp4",
+    ".aac",
+    ".wma",
+    ".wav",
 }
 
 # Detects "_OC_ReMix" suffix on the bare filename stem
-OCREMIX_STEM_RE = re.compile(r'_OC_ReMix$', re.IGNORECASE)
+OCREMIX_STEM_RE = re.compile(r"_OC_ReMix$", re.IGNORECASE)
 
 # Tag values that are placeholders and should not be trusted
 _JUNK_TAG_RE = re.compile(
-    r'^(va|v\.a\.|v/a|various\s*artists?|various|'
-    r'unknown\s*(artist|title)?|unknown|artist|title|'
-    r'track\s*\d+|untitled|\d+|audio(\s*track)?|'
-    r'mpeg\s*audio|no\s*artist|no\s*title)$',
+    r"^(va|v\.a\.|v/a|various\s*artists?|various|"
+    r"unknown\s*(artist|title)?|unknown|artist|title|"
+    r"track\s*\d+|untitled|\d+|audio(\s*track)?|"
+    r"mpeg\s*audio|no\s*artist|no\s*title)$",
     re.IGNORECASE,
 )
 
 # Detects track-number-only filenames like "01 Track 1", "02", "03 Track 3"
-TRACK_NUM_ONLY_RE = re.compile(r'^\d{1,3}(\s+(track\s+\d+)?)?$', re.IGNORECASE)
+TRACK_NUM_ONLY_RE = re.compile(r"^\d{1,3}(\s+(track\s+\d+)?)?$", re.IGNORECASE)
 
 # Strips date/time junk from ripped folder names: "Deep River (7_26_2009 9_47_51 PM)"
-FOLDER_DATE_RE = re.compile(r'\s*\([0-9_/\s:APMapm]+\)\s*$')
+FOLDER_DATE_RE = re.compile(r"\s*\([0-9_/\s:APMapm]+\)\s*$")
 
 
 TrackInfo = ExtractedTrack
@@ -69,33 +69,31 @@ def _read_tags(path: str) -> dict:
     return {
         key: value
         for key, value in {
-            'TPE1': tags.get('artist', ''),
-            'TIT2': tags.get('title', ''),
-            'TALB': tags.get('album', ''),
-            'TPE2': tags.get('album_artist', ''),
-            'TIT1': tags.get('grouping', ''),
-            'TIT3': tags.get('subtitle', ''),
+            "TPE1": tags.get("artist", ""),
+            "TIT2": tags.get("title", ""),
+            "TALB": tags.get("album", ""),
+            "TPE2": tags.get("album_artist", ""),
+            "TIT1": tags.get("grouping", ""),
+            "TIT3": tags.get("subtitle", ""),
         }.items()
         if value
     }
 
 
-_OCREMIX_PAREN_RE = re.compile(r'\(\s*OC\s*Re[Mm]ix\s*\)', re.IGNORECASE)
+_OCREMIX_PAREN_RE = re.compile(r"\(\s*OC\s*Re[Mm]ix\s*\)", re.IGNORECASE)
 
 
 def _detect_ocremix(tags: dict, filename: str) -> bool:
     stem = os.path.splitext(filename)[0]
-    if OCREMIX_STEM_RE.search(stem):              # _OC_ReMix suffix (collection format)
+    if OCREMIX_STEM_RE.search(stem):  # _OC_ReMix suffix (collection format)
         return True
-    if _OCREMIX_PAREN_RE.search(stem):            # (OC ReMix) in filename (Gamer's Delight)
+    if _OCREMIX_PAREN_RE.search(stem):  # (OC ReMix) in filename (Gamer's Delight)
         return True
-    if 'ocremix' in tags.get('TALB', '').lower():
+    if "ocremix" in tags.get("TALB", "").lower():
         return True
-    if tags.get('TPE2', '') == 'OverClocked ReMix':
+    if tags.get("TPE2", "") == "OverClocked ReMix":
         return True
-    if 'OC ReMix' in tags.get('TIT2', ''):
-        return True
-    return False
+    return "OC ReMix" in tags.get("TIT2", "")
 
 
 def _split_ocremix_artists(raw: str) -> list[str]:
@@ -104,24 +102,20 @@ def _split_ocremix_artists(raw: str) -> list[str]:
     Handles both comma separation and 'feat.' notation within the artist field:
       'ArtistA feat. ArtistB, ArtistC' → ['ArtistA', 'ArtistB', 'ArtistC']
     """
-    feat_parts = re.split(r'\s+(?:feat(?:uring)?\.?|ft\.?)\s+', raw, flags=re.IGNORECASE)
+    feat_parts = re.split(r"\s+(?:feat(?:uring)?\.?|ft\.?)\s+", raw, flags=re.IGNORECASE)
     result = []
     for part in feat_parts:
         result.extend(
-            normalize_title_text(artist)
-            for artist in re.split(r',\s*', part)
-            if artist.strip()
+            normalize_title_text(artist) for artist in re.split(r",\s*", part) if artist.strip()
         )
     return result
 
 
 def _from_ocremix_new_tags(path: str, ext: str, tags: dict) -> TrackInfo:
     """Read the legacy OC ReMix Collection tag layout."""
-    game = normalize_title_text(tags.get('TIT1', '').strip())
-    title = normalize_title_text(
-        strip_ocremix_suffix(tags.get('TIT3', '').strip())
-    )
-    artists_raw = tags.get('TPE1', '').strip()
+    game = normalize_title_text(tags.get("TIT1", "").strip())
+    title = normalize_title_text(strip_ocremix_suffix(tags.get("TIT3", "").strip()))
+    artists_raw = tags.get("TPE1", "").strip()
     remixers = _split_ocremix_artists(artists_raw)
     return TrackInfo(
         path=path,
@@ -130,19 +124,17 @@ def _from_ocremix_new_tags(path: str, ext: str, tags: dict) -> TrackInfo:
         game=game,
         title=title,
         remixers=remixers,
-        strategy='ocremix_tagged',
+        strategy="ocremix_tagged",
     )
 
 
 def _from_ocremix_writer_tags(path: str, ext: str, tags: dict) -> TrackInfo:
     """Read the schema written by the canonical tag writer without reinterpreting TIT3."""
     game = normalize_title_text(
-        (tags.get('TPE1') or tags.get('TALB') or tags.get('TIT1', '')).strip()
+        (tags.get("TPE1") or tags.get("TALB") or tags.get("TIT1", "")).strip()
     )
-    title = normalize_title_text(
-        strip_ocremix_suffix(tags.get('TIT2', '').strip())
-    )
-    remixers = _split_ocremix_artists(tags.get('TIT3', '').strip())
+    title = normalize_title_text(strip_ocremix_suffix(tags.get("TIT2", "").strip()))
+    remixers = _split_ocremix_artists(tags.get("TIT3", "").strip())
     return TrackInfo(
         path=path,
         ext=ext,
@@ -150,23 +142,30 @@ def _from_ocremix_writer_tags(path: str, ext: str, tags: dict) -> TrackInfo:
         game=game,
         title=title,
         remixers=remixers,
-        strategy='ocremix_tagged',
+        strategy="ocremix_tagged",
     )
 
 
 def _from_ocremix_old_tags(path: str, ext: str, tags: dict) -> TrackInfo:
     """Gamer's Delight: TPE1=game name, TIT2=title (OC ReMix). No remixer in metadata."""
-    game = normalize_title_text(tags.get('TPE1', '').strip())
-    title = normalize_title_text(strip_ocremix_suffix(tags.get('TIT2', '').strip()))
-    return TrackInfo(path=path, ext=ext, is_ocremix=True, game=game,
-                     title=title, remixers=[], needs_lookup=True,
-                     strategy='ocremix_old_tags')
+    game = normalize_title_text(tags.get("TPE1", "").strip())
+    title = normalize_title_text(strip_ocremix_suffix(tags.get("TIT2", "").strip()))
+    return TrackInfo(
+        path=path,
+        ext=ext,
+        is_ocremix=True,
+        game=game,
+        title=title,
+        remixers=[],
+        needs_lookup=True,
+        strategy="ocremix_old_tags",
+    )
 
 
 def _from_tags(path: str, ext: str, tags: dict) -> TrackInfo:
     """Regular music with good ID3 tags."""
-    artist_raw = tags.get('TPE1', '').strip()
-    title_raw = tags.get('TIT2', '').strip()
+    artist_raw = tags.get("TPE1", "").strip()
+    title_raw = tags.get("TIT2", "").strip()
 
     # No artist in tags — the TIT2 may be "Artist - Title" (some taggers store it that way)
     if not artist_raw:
@@ -179,8 +178,14 @@ def _from_tags(path: str, ext: str, tags: dict) -> TrackInfo:
     seen = set(feat_from_artist)
     combined_feat = feat_from_artist + [f for f in feat_from_title if f not in seen]
 
-    return TrackInfo(path=path, ext=ext, artist=artist, title=title,
-                     feat_artists=combined_feat, strategy='tag_based')
+    return TrackInfo(
+        path=path,
+        ext=ext,
+        artist=artist,
+        title=title,
+        feat_artists=combined_feat,
+        strategy="tag_based",
+    )
 
 
 def _from_filename(path: str, ext: str, is_ocremix: bool) -> TrackInfo:
@@ -192,8 +197,9 @@ def _from_filename(path: str, ext: str, is_ocremix: bool) -> TrackInfo:
 
     parsed = parse_regular_stem(stem)
     if parsed is None:
-        return TrackInfo(path=path, ext=ext,
-                         skip_reason='No artist–title separator found in filename')
+        return TrackInfo(
+            path=path, ext=ext, skip_reason="No artist–title separator found in filename"
+        )
 
     artist = _smart_capitalize(parsed.artist)
     return TrackInfo(
@@ -202,46 +208,61 @@ def _from_filename(path: str, ext: str, is_ocremix: bool) -> TrackInfo:
         artist=artist,
         title=parsed.title,
         feat_artists=list(parsed.features),
-        strategy='filename_norm',
+        strategy="filename_norm",
     )
 
 
 def _from_ocremix_filename(path: str, ext: str, stem: str) -> TrackInfo:
     """OC ReMix file with no usable tags — parse game/title from filename."""
-    clean = OCREMIX_STEM_RE.sub('', stem).replace('_', ' ')
+    clean = OCREMIX_STEM_RE.sub("", stem).replace("_", " ")
     clean = strip_ocremix_suffix(clean).strip()
 
-    if ' - ' not in clean:
-        return TrackInfo(path=path, ext=ext,
-                         skip_reason='Cannot split game/title in OC ReMix filename')
+    if " - " not in clean:
+        return TrackInfo(
+            path=path, ext=ext, skip_reason="Cannot split game/title in OC ReMix filename"
+        )
 
-    game, title = clean.split(' - ', 1)
-    return TrackInfo(path=path, ext=ext, is_ocremix=True, game=game.strip(),
-                     title=normalize_title_text(title), remixers=[], needs_lookup=True,
-                     strategy='ocremix_filename')
+    game, title = clean.split(" - ", 1)
+    return TrackInfo(
+        path=path,
+        ext=ext,
+        is_ocremix=True,
+        game=game.strip(),
+        title=normalize_title_text(title),
+        remixers=[],
+        needs_lookup=True,
+        strategy="ocremix_filename",
+    )
 
 
 def _from_musicbrainz_lookup(path: str, ext: str) -> TrackInfo:
-    """Files like '01 Track 1.mp3' — we only know the track number and the album (from the parent folder)."""
+    """Files like '01 Track 1.mp3' — only track number and parent-folder album are known."""
     stem = os.path.splitext(os.path.basename(path))[0]
     parent_dir = os.path.dirname(path)
     parent = os.path.basename(parent_dir)
     grandparent = os.path.basename(os.path.dirname(parent_dir))
-    album = FOLDER_DATE_RE.sub('', parent).strip()
+    album = FOLDER_DATE_RE.sub("", parent).strip()
 
     # Use grandparent folder as artist hint (structure: Artist/Album/tracks)
     # Exclude obviously non-artist folder names
-    _skip = {'music', 'mp3', 'flac', 'downloads', 'albums', ''}
-    artist_hint = grandparent if grandparent.lower() not in _skip else ''
+    _skip = {"music", "mp3", "flac", "downloads", "albums", ""}
+    artist_hint = grandparent if grandparent.lower() not in _skip else ""
 
-    track_match = re.match(r'^(\d+)', stem)
+    track_match = re.match(r"^(\d+)", stem)
     if not track_match:
-        return TrackInfo(path=path, ext=ext,
-                         skip_reason='Cannot extract track number for MusicBrainz lookup')
+        return TrackInfo(
+            path=path, ext=ext, skip_reason="Cannot extract track number for MusicBrainz lookup"
+        )
 
-    return TrackInfo(path=path, ext=ext, needs_lookup=True, strategy='musicbrainz',
-                     mb_album=album, mb_track_num=int(track_match.group(1)),
-                     artist=artist_hint)
+    return TrackInfo(
+        path=path,
+        ext=ext,
+        needs_lookup=True,
+        strategy="musicbrainz",
+        mb_album=album,
+        mb_track_num=int(track_match.group(1)),
+        artist=artist_hint,
+    )
 
 
 def _is_junk_tag(value: str) -> bool:
@@ -255,26 +276,25 @@ def _is_junk_tag(value: str) -> bool:
     if _JUNK_TAG_RE.match(v):
         return True
     # Copied from a filename: underscores but no spaces, length > 3
-    if '_' in v and ' ' not in v and len(v) > 3:
-        return True
-    return False
+    return bool("_" in v and " " not in v and len(v) > 3)
 
 
-def _from_acoustid(path: str, ext: str, api_key: str) -> 'TrackInfo | None':
+def _from_acoustid(path: str, ext: str, api_key: str) -> "TrackInfo | None":
     """Fingerprint the audio and return a TrackInfo if a confident match is found."""
     from .acoustid import lookup
+
     result = lookup(path, api_key)
     if not result:
         return None
     track = TrackInfo(
         path=path,
         ext=ext,
-        artist=result['artist'],
-        title=result['title'],
-        feat_artists=result['feat_artists'],
-        strategy='acoustid',
-        acoustid_score=result.get('score'),
-        acoustid_recording_id=result.get('recording_id', ''),
+        artist=result["artist"],
+        title=result["title"],
+        feat_artists=result["feat_artists"],
+        strategy="acoustid",
+        acoustid_score=result.get("score"),
+        acoustid_recording_id=result.get("recording_id", ""),
     )
     return _preserve_filename_version_qualifiers(path, track)
 
@@ -302,11 +322,11 @@ def _forced_strategy_track(
     ext: str,
     strategy: str | None,
 ) -> TrackInfo | None:
-    if strategy == 'musicbrainz':
+    if strategy == "musicbrainz":
         return _from_musicbrainz_lookup(path, ext)
-    if strategy == 'regular':
+    if strategy == "regular":
         return _from_filename(path, ext, is_ocremix=False)
-    if strategy == 'filename_norm':
+    if strategy == "filename_norm":
         tags = _read_tags(path)
         return _from_filename(
             path,
@@ -324,8 +344,7 @@ def _acoustid_match(
     prefer_acoustid: bool,
 ) -> TrackInfo | None:
     if not acoustid_key or (
-        not prefer_acoustid
-        and strategy in {'regular', 'filename_norm', 'musicbrainz'}
+        not prefer_acoustid and strategy in {"regular", "filename_norm", "musicbrainz"}
     ):
         return None
     return _from_acoustid(path, ext, acoustid_key)
@@ -335,18 +354,15 @@ def _auto_detect_track(path: str, ext: str, tags: dict) -> TrackInfo:
     filename = os.path.basename(path)
     is_ocremix = _detect_ocremix(tags, filename)
     has_writer_ocremix_tags = bool(
-        tags.get('TIT2')
-        and tags.get('TPE2', '').casefold() == 'overclocked remix'
+        tags.get("TIT2") and tags.get("TPE2", "").casefold() == "overclocked remix"
     )
     has_new_ocremix_tags = bool(
-        tags.get('TIT1') and tags.get('TIT3') and not has_writer_ocremix_tags
+        tags.get("TIT1") and tags.get("TIT3") and not has_writer_ocremix_tags
     )
-    artist_tag = tags.get('TPE1', '')
-    title_tag = tags.get('TIT2', '')
+    artist_tag = tags.get("TPE1", "")
+    title_tag = tags.get("TIT2", "")
     has_basic_tags = bool(artist_tag or title_tag)
-    tags_are_good = has_basic_tags and not (
-        _is_junk_tag(artist_tag) or _is_junk_tag(title_tag)
-    )
+    tags_are_good = has_basic_tags and not (_is_junk_tag(artist_tag) or _is_junk_tag(title_tag))
     if is_ocremix and has_writer_ocremix_tags:
         return _from_ocremix_writer_tags(path, ext, tags)
     if is_ocremix and has_new_ocremix_tags:
@@ -381,8 +397,7 @@ def extract_track(
     """
     ext = os.path.splitext(path)[1].lower()
     if ext not in AUDIO_EXTENSIONS:
-        return TrackInfo(path=path, ext=ext,
-                         skip_reason=f'Unsupported format ({ext})')
+        return TrackInfo(path=path, ext=ext, skip_reason=f"Unsupported format ({ext})")
     forced_track = _forced_strategy_track(path, ext, strategy)
     if forced_track is not None:
         return forced_track

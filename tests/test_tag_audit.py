@@ -44,9 +44,7 @@ def test_regular_tag_writer_accepts_compact_hyphen_separator():
 
 
 def test_tag_writer_uses_canonical_regular_identity():
-    parsed = parse_stem(
-        "Artist - Song ((feat. Guest)) [Extended Mix].mp3.mp3"
-    )
+    parsed = parse_stem("Artist - Song ((feat. Guest)) [Extended Mix].mp3.mp3")
 
     assert parsed is not None
     assert parsed["full_title"] == "Song (Extended Mix) (feat. Guest)"

@@ -163,18 +163,12 @@ def _duration_spread(tracks: list[RegularTrack]) -> float | None:
 
 def _classify(tracks: list[RegularTrack]) -> str:
     hashes = {track.sha256 for track in tracks if track.sha256}
-    if len(hashes) == 1 and len(hashes) == len(
-        [track for track in tracks if track.sha256]
-    ):
+    if len(hashes) == 1 and len(hashes) == len([track for track in tracks if track.sha256]):
         return "auto-safe"
 
     versions = {_version_key(track) for track in tracks}
     fingerprints = {track.fingerprint for track in tracks if track.fingerprint}
-    if (
-        len(fingerprints) == 1
-        and len(fingerprints) == len(tracks)
-        and len(versions) == 1
-    ):
+    if len(fingerprints) == 1 and len(fingerprints) == len(tracks) and len(versions) == 1:
         return "review"
     durations_close = all(
         _duration_close(left.duration, right.duration)
@@ -192,9 +186,7 @@ def _finding(tracks: list[RegularTrack], classification: str) -> DuplicateFindin
         "hashes": {track.path: track.sha256 for track in tracks},
         "fingerprints": {track.path: track.fingerprint for track in tracks},
         "fingerprint_errors": {
-            track.path: track.fingerprint_error
-            for track in tracks
-            if track.fingerprint_error
+            track.path: track.fingerprint_error for track in tracks if track.fingerprint_error
         },
         "durations": {track.path: track.duration for track in tracks},
         "bitrates": {track.path: track.bitrate for track in tracks},
@@ -220,7 +212,61 @@ def _finding(tracks: list[RegularTrack], classification: str) -> DuplicateFindin
     )
 
 
-def analyze_regular_duplicates(
+def _tracks_for_analysis(
+    tracks: list[RegularTrack] | None,
+    *,
+    folder_path: str | None,
+    recursive: bool,
+    progress: Callable[[int, int, str], None] | None,
+    cancel_event,
+    fingerprint: bool,
+) -> list[RegularTrack]:
+    if tracks is not None:
+        return tracks
+    if folder_path is None:
+        raise ValueError("folder_path is required when tracks is not provided")
+    return collect_tracks(
+        folder_path,
+        recursive,
+        progress=progress,
+        cancel_event=cancel_event,
+        fingerprint=fingerprint,
+    )
+
+
+def _exact_hash_findings(
+    tracks: list[RegularTrack],
+) -> tuple[list[DuplicateFinding], set[str]]:
+    by_hash: dict[str, list[RegularTrack]] = {}
+    for track in tracks:
+        if track.sha256:
+            by_hash.setdefault(track.sha256, []).append(track)
+
+    findings = []
+    consumed: set[str] = set()
+    for group in by_hash.values():
+        if len(group) > 1:
+            findings.append(_finding(group, "auto-safe"))
+            consumed.update(track.path for track in group)
+    return findings, consumed
+
+
+def _core_findings(
+    tracks: list[RegularTrack],
+    consumed: set[str],
+) -> list[DuplicateFinding]:
+    by_core: dict[tuple, list[RegularTrack]] = {}
+    for track in tracks:
+        if track.path in consumed:
+            continue
+        core_key = _core_key(track)
+        if core_key != ("", ""):
+            by_core.setdefault(core_key, []).append(track)
+    return [_finding(group, _classify(group)) for group in by_core.values() if len(group) > 1]
+
+
+# Preserve positional arguments supported by this public compatibility API.
+def analyze_regular_duplicates(  # noqa: PLR0917
     folder_path: str | None = None,
     recursive: bool = False,
     progress: Callable[[int, int, str], None] | None = None,
@@ -236,42 +282,22 @@ def analyze_regular_duplicates(
     re-scanning and re-hashing here; only the cheap in-memory grouping
     below runs in that case.
     """
-    if tracks is None:
-        if folder_path is None:
-            raise ValueError("folder_path is required when tracks is not provided")
-        tracks = collect_tracks(
-            folder_path,
-            recursive,
-            progress=progress,
-            cancel_event=cancel_event,
-            fingerprint=fingerprint,
-        )
+    tracks = _tracks_for_analysis(
+        tracks,
+        folder_path=folder_path,
+        recursive=recursive,
+        progress=progress,
+        cancel_event=cancel_event,
+        fingerprint=fingerprint,
+    )
     tracks = _apply_identity_overrides(tracks, identity_overrides)
-    by_hash: dict[str, list[RegularTrack]] = {}
-    for track in tracks:
-        if track.sha256:
-            by_hash.setdefault(track.sha256, []).append(track)
-
-    findings: list[DuplicateFinding] = []
-    consumed: set[str] = set()
-    for group in by_hash.values():
-        if len(group) > 1:
-            findings.append(_finding(group, "auto-safe"))
-            consumed.update(track.path for track in group)
-
-    by_core: dict[tuple, list[RegularTrack]] = {}
-    for track in tracks:
-        if track.path not in consumed and _core_key(track) != ("", ""):
-            by_core.setdefault(_core_key(track), []).append(track)
-
-    for group in by_core.values():
-        if len(group) < 2:
-            continue
-        findings.append(_finding(group, _classify(group)))
+    findings, consumed = _exact_hash_findings(tracks)
+    findings.extend(_core_findings(tracks, consumed))
     return sorted(findings, key=lambda item: item.paths)
 
 
-def analyze_duplicates(
+# Preserve positional arguments supported by this public compatibility API.
+def analyze_duplicates(  # noqa: PLR0917
     folder_path: str,
     recursive: bool = False,
     progress: Callable[[int, int, str], None] | None = None,
@@ -290,7 +316,8 @@ def analyze_duplicates(
     )
 
 
-def dedup_folder(
+# Preserve positional arguments supported by this public compatibility API.
+def dedup_folder(  # noqa: PLR0917
     folder_path: str,
     dry_run: bool = True,
     recursive: bool = False,
@@ -310,9 +337,7 @@ def dedup_folder(
     )
     counts = {
         "groups": len(findings),
-        "auto_safe_groups": sum(
-            item.classification == "auto-safe" for item in findings
-        ),
+        "auto_safe_groups": sum(item.classification == "auto-safe" for item in findings),
         "review_groups": sum(item.classification == "review" for item in findings),
         "unsafe_groups": sum(item.classification == "unsafe" for item in findings),
         "to_delete": 0,
@@ -324,8 +349,7 @@ def dedup_folder(
     if not dry_run:
         counts["errors"] = 1
         counts["message"] = (
-            "Duplicate removal is review-only until the Recycle Bin apply path "
-            "is enabled."
+            "Duplicate removal is review-only until the Recycle Bin apply path is enabled."
         )
     return counts
 

@@ -42,27 +42,19 @@ def test_recovery_queries_can_be_scoped_to_review_root(
         )
 
     assert [
-        batch["batch_id"]
-        for batch in apply_module.batches_requiring_recovery(str(first_root))
+        batch["batch_id"] for batch in apply_module.batches_requiring_recovery(str(first_root))
     ] == ["first"]
     assert [
-        batch["batch_id"]
-        for batch in apply_module.batches_requiring_recovery(str(second_root))
+        batch["batch_id"] for batch in apply_module.batches_requiring_recovery(str(second_root))
     ] == ["second"]
-    assert (
-        apply_module.latest_undoable_batch(str(second_root))["batch_id"]
-        == "second"
-    )
+    assert apply_module.latest_undoable_batch(str(second_root))["batch_id"] == "second"
 
 
 def test_apply_uses_reviewed_rename_and_undo(tmp_path, monkeypatch, app_paths):
     source = tmp_path / "old.mp3"
     destination = tmp_path / "new.mp3"
     source.write_bytes(b"audio")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
     snapshot = FileSnapshot.capture(str(source))
     proposal = RenameProposal(
         id="rename-1",
@@ -95,14 +87,12 @@ def test_tag_apply_restores_backup(tmp_path, monkeypatch, app_paths):
     source = tmp_path / "Artist - Song.mp3"
     source.write_bytes(b"audio")
     state = tmp_path / "state"
-    monkeypatch.setattr(apply_module, "ensure_app_dirs",
-                        lambda: app_paths(state))
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(state))
     written = []
     monkeypatch.setattr(
         apply_module,
         "write_tags_to_file",
-        lambda path, after: written.append((path, after)) or {
-            "status": "updated"},
+        lambda path, after: written.append((path, after)) or {"status": "updated"},
     )
     monkeypatch.setattr(
         apply_module,
@@ -114,9 +104,7 @@ def test_tag_apply_restores_backup(tmp_path, monkeypatch, app_paths):
             tags={"artist": "Artist", "title": "Song"},
         ),
     )
-    snapshot = FileSnapshot.capture(
-        str(source), tags={"artist": "Wrong", "title": "Wrong"}
-    )
+    snapshot = FileSnapshot.capture(str(source), tags={"artist": "Wrong", "title": "Wrong"})
     proposal = TagProposal(
         id="tag-1",
         decision_group_id="group-1",
@@ -136,8 +124,7 @@ def test_tag_apply_restores_backup(tmp_path, monkeypatch, app_paths):
     assert written[0][0] != str(source)
     assert Path(written[0][0]).suffix == ".mp3"
     assert written[0][1] == {"artist": "Artist", "title": "Song"}
-    backup = json.loads(
-        Path(results[0].backup_path).read_text(encoding="utf-8"))
+    backup = json.loads(Path(results[0].backup_path).read_text(encoding="utf-8"))
     assert backup["before"] == {"artist": "Wrong", "title": "Wrong"}
 
 
@@ -146,10 +133,7 @@ def test_apply_rejects_existing_unrelated_destination(tmp_path, monkeypatch, app
     destination = tmp_path / "new.mp3"
     source.write_bytes(b"source")
     destination.write_bytes(b"unrelated")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
     proposal = RenameProposal(
         id="rename-collision",
         decision_group_id="group",
@@ -177,10 +161,7 @@ def test_apply_writes_reviewed_tags_for_nonstandard_filename(
 ):
     source = tmp_path / "NoArtistTitle.mp3"
     source.write_bytes(b"source")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
     monkeypatch.setattr(
         apply_module,
         "write_tags_to_file",
@@ -221,10 +202,7 @@ def test_apply_preflights_unsupported_tag_file_type(
 ):
     source = tmp_path / "Artist - Song.wav"
     source.write_bytes(b"source")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
     proposal = TagProposal(
         id="tag-unsupported-type",
         decision_group_id="group",
@@ -253,10 +231,7 @@ def test_apply_continues_after_failed_tag_write(
     safe_source = tmp_path / "Artist - Safe.mp3"
     failed_source.write_bytes(b"failed")
     safe_source.write_bytes(b"safe")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
 
     def proposal(identifier: str, source: Path) -> TagProposal:
         return TagProposal(
@@ -291,8 +266,7 @@ def test_apply_continues_after_failed_tag_write(
         )
 
     monkeypatch.setattr(apply_module, "_apply_tag", fake_apply_tag)
-    plan = ReviewPlan.create(str(tmp_path), False,
-                             tag_proposals=[failed, safe])
+    plan = ReviewPlan.create(str(tmp_path), False, tag_proposals=[failed, safe])
 
     results = apply_module.apply_review_plan(plan, [failed.id, safe.id])
 
@@ -312,10 +286,7 @@ def test_apply_continues_after_unrelated_destination_block(
     safe_source.write_bytes(b"safe")
     blocked_source.write_bytes(b"blocked")
     blocked_destination.write_bytes(b"existing")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
 
     safe = RenameProposal(
         id="rename-safe",
@@ -365,10 +336,7 @@ def test_apply_preflight_blocks_unknown_artist_filename(
     source = tmp_path / "Known Artist - Song.mp3"
     destination = tmp_path / "Unknown Artist - Song.mp3"
     source.write_bytes(b"audio")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
     proposal = RenameProposal(
         id="rename-placeholder",
         decision_group_id="placeholder-group",
@@ -571,9 +539,7 @@ def test_undo_removes_artwork_when_original_had_none(
     replacement_cover = fixtures / "cover.jpg"
     replacement_art = {
         "path": str(replacement_cover),
-        "sha256": hashlib.sha256(
-            replacement_cover.read_bytes()
-        ).hexdigest(),
+        "sha256": hashlib.sha256(replacement_cover.read_bytes()).hexdigest(),
         "size": replacement_cover.stat().st_size,
         "mime_type": "image/jpeg",
         "release_id": "release",
@@ -658,10 +624,7 @@ def test_undo_is_idempotent_after_successful_restore(
     source = tmp_path / "old.mp3"
     destination = tmp_path / "new.mp3"
     source.write_bytes(b"audio")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
     proposal = RenameProposal(
         id="rename-idempotent",
         decision_group_id="group",
@@ -691,10 +654,7 @@ def test_targeted_undo_batch(tmp_path, monkeypatch, app_paths):
     dest2 = tmp_path / "renamed2.mp3"
     source1.write_bytes(b"audio1")
     source2.write_bytes(b"audio2")
-    monkeypatch.setattr(
-        apply_module, "ensure_app_dirs", lambda: app_paths(
-            tmp_path / "state")
-    )
+    monkeypatch.setattr(apply_module, "ensure_app_dirs", lambda: app_paths(tmp_path / "state"))
     p1 = RenameProposal(
         id="rename-1",
         decision_group_id="group1",
@@ -723,8 +683,7 @@ def test_targeted_undo_batch(tmp_path, monkeypatch, app_paths):
     assert dest1.is_file() and dest2.is_file()
 
     # Restore only group1
-    results = apply_module.undo_batch(
-        plan.batch_id, decision_group_ids=["group1"])
+    results = apply_module.undo_batch(plan.batch_id, decision_group_ids=["group1"])
     assert len(results) == 1
     assert results[0].status == "succeeded"
     assert source1.is_file() and not dest1.is_file()
@@ -735,8 +694,7 @@ def test_targeted_undo_batch(tmp_path, monkeypatch, app_paths):
     assert batch_info["status"] == "completed"
 
     # Restore remaining group2
-    results2 = apply_module.undo_batch(
-        plan.batch_id, decision_group_ids=["group2"])
+    results2 = apply_module.undo_batch(plan.batch_id, decision_group_ids=["group2"])
     assert len(results2) == 1
     assert results2[0].status == "succeeded"
     assert source2.is_file() and not dest2.is_file()

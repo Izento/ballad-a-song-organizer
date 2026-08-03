@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tkinter as tk
+from contextlib import suppress
 from pathlib import Path
 from tkinter import messagebox, ttk
 
@@ -107,8 +108,10 @@ class SongOrganizerApp(
     def _set_capability_text(self, fpcalc_path: Path | None) -> None:
         fpcalc_state = "available" if fpcalc_path else "not installed (optional)"
         online_state = (
-            "ready" if self.acoustid_key and fpcalc_path and self.musicbrainz_available
-            else "MusicBrainz client missing" if not self.musicbrainz_available
+            "ready"
+            if self.acoustid_key and fpcalc_path and self.musicbrainz_available
+            else "MusicBrainz client missing"
+            if not self.musicbrainz_available
             else "embedded IDs only"
         )
         self.capability_var = tk.StringVar(
@@ -141,10 +144,8 @@ class SongOrganizerApp(
             lambda: self.root.iconbitmap(str(icon_path)),
             lambda: self.root.iconbitmap(default=str(icon_path)),
         ):
-            try:
+            with suppress(tk.TclError):
                 call()
-            except tk.TclError:
-                pass
 
     def _set_windows_icon_handles(self, icon_path: Path) -> None:
         try:
@@ -153,13 +154,20 @@ class SongOrganizerApp(
             user32 = ctypes.windll.user32
             load_image = user32.LoadImageW
             load_image.argtypes = [
-                ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_uint, ctypes.c_int,
-                ctypes.c_int, ctypes.c_uint,
+                ctypes.c_void_p,
+                ctypes.c_wchar_p,
+                ctypes.c_uint,
+                ctypes.c_int,
+                ctypes.c_int,
+                ctypes.c_uint,
             ]
             load_image.restype = ctypes.c_void_p
             send_message = user32.SendMessageW
             send_message.argtypes = [
-                ctypes.c_void_p, ctypes.c_uint, ctypes.c_size_t, ctypes.c_void_p,
+                ctypes.c_void_p,
+                ctypes.c_uint,
+                ctypes.c_size_t,
+                ctypes.c_void_p,
             ]
             send_message.restype = ctypes.c_void_p
             self._icon_handles = self._load_icon_handles(load_image, send_message, icon_path)
@@ -197,9 +205,7 @@ class SongOrganizerApp(
         ttk.Label(library, textvariable=self.capability_var).pack(anchor=tk.W, pady=(6, 0))
 
     def _build_options_bar(self) -> None:
-        options = ttk.Labelframe(
-            self.root, text="Identification & duplicate detection", padding=10
-        )
+        options = ttk.Labelframe(self.root, text="Identification & duplicate detection", padding=10)
         options.pack(fill=tk.X, padx=10, pady=(0, 6))
         self._build_online_option(options)
         self._build_cover_art_option(options)
@@ -210,7 +216,8 @@ class SongOrganizerApp(
 
     def _build_online_option(self, parent) -> None:
         self.online_identification_check = ttk.Checkbutton(
-            parent, text="Use AcoustID identification",
+            parent,
+            text="Use AcoustID identification",
             variable=self.online_identification_var,
             state=tk.NORMAL if self.acoustid_key and self.fpcalc_available else tk.DISABLED,
         )
@@ -256,7 +263,8 @@ class SongOrganizerApp(
 
     def _build_fingerprint_option(self, parent) -> None:
         self.fingerprint_check = ttk.Checkbutton(
-            parent, text="Fingerprint audio for stronger duplicate matches",
+            parent,
+            text="Fingerprint audio for stronger duplicate matches",
             variable=self.fingerprint_var,
         )
         self.fingerprint_check.pack(side=tk.LEFT, padx=(16, 0))
@@ -275,8 +283,10 @@ class SongOrganizerApp(
         self.notebook.grid(row=0, column=0, sticky=tk.NSEW)
         self.trees, self.tabs = {}, {}
         for key, title in (
-            ("renames", "Filename changes"), ("tags", "Metadata changes"),
-            ("duplicates", "Duplicate findings (read-only)"), ("errors", "Skipped / errors"),
+            ("renames", "Filename changes"),
+            ("tags", "Metadata changes"),
+            ("duplicates", "Duplicate findings (read-only)"),
+            ("errors", "Skipped / errors"),
         ):
             frame = ttk.Frame(self.notebook, padding=6)
             self.notebook.add(frame, text=title)
@@ -289,9 +299,7 @@ class SongOrganizerApp(
         bottom.pack(fill=tk.X)
         bottom.columnconfigure(1, weight=1)
         self._build_selection_controls(bottom)
-        ttk.Label(bottom, textvariable=self.status_var).grid(
-            row=0, column=1, sticky=tk.EW, padx=12
-        )
+        ttk.Label(bottom, textvariable=self.status_var).grid(row=0, column=1, sticky=tk.EW, padx=12)
         self._build_action_controls(bottom)
 
     def _build_selection_controls(self, parent) -> None:
@@ -317,19 +325,31 @@ class SongOrganizerApp(
             actions, text="Quarantine", command=self._handle_quarantine_button_click
         )
         self.undo_button = ttk.Button(actions, text="Undo latest", command=self._undo_latest)
-        for button in (self.cancel_button, self.history_button, self.quarantine_button, self.undo_button):
+        for button in (
+            self.cancel_button,
+            self.history_button,
+            self.quarantine_button,
+            self.undo_button,
+        ):
             button.pack(side=tk.LEFT, padx=(8, 0))
         ttk.Separator(actions, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
         self._build_primary_button(actions)
 
     def _build_primary_button(self, parent) -> None:
         self.primary_button = tk.Button(
-            parent, text="Organize library", command=self._organize_library,
-            background=_PRIMARY_BUTTON_BG, activebackground=_PRIMARY_BUTTON_ACTIVE_BG,
-            foreground="white", activeforeground="white",
+            parent,
+            text="Organize library",
+            command=self._organize_library,
+            background=_PRIMARY_BUTTON_BG,
+            activebackground=_PRIMARY_BUTTON_ACTIVE_BG,
+            foreground="white",
+            activeforeground="white",
             disabledforeground=_PRIMARY_BUTTON_DISABLED_FG,
-            font=("TkDefaultFont", 10, "bold"), relief=tk.FLAT, cursor="hand2",
-            padx=14, pady=3,
+            font=("TkDefaultFont", 10, "bold"),
+            relief=tk.FLAT,
+            cursor="hand2",
+            padx=14,
+            pady=3,
         )
         self.primary_button.pack(side=tk.LEFT)
         self._update_primary_button()
@@ -343,13 +363,18 @@ class SongOrganizerApp(
     def _set_busy(self, busy: bool) -> None:
         state = tk.DISABLED if busy else tk.NORMAL
         self.online_identification_check.configure(
-            state=tk.DISABLED if busy or not (
-                self.acoustid_key and self.fpcalc_available
-            ) else tk.NORMAL
+            state=tk.DISABLED
+            if busy or not (self.acoustid_key and self.fpcalc_available)
+            else tk.NORMAL
         )
         for widget in (
-            self.cover_art_check, self.propose_renames_check, self.duplicate_check_check,
-            self.edit_button, self.history_button, self.quarantine_button, self.undo_button,
+            self.cover_art_check,
+            self.propose_renames_check,
+            self.duplicate_check_check,
+            self.edit_button,
+            self.history_button,
+            self.quarantine_button,
+            self.undo_button,
         ):
             widget.configure(state=state)
         self._sync_fingerprint_availability(busy=busy)
@@ -371,7 +396,8 @@ class SongOrganizerApp(
         count = self._selection_group_count()
         self.primary_button.configure(
             text=f"Apply selected ({count})" if count else "Apply selected",
-            command=self._apply, state=tk.NORMAL if count else tk.DISABLED,
+            command=self._apply,
+            state=tk.NORMAL if count else tk.DISABLED,
         )
 
     def _close(self) -> None:

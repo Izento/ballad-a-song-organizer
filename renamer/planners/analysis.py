@@ -227,10 +227,7 @@ def _enriched_results(
         tracks,
         identity_overrides=_identity_overrides(renames, tags),
     )
-    return renames, tags, issues, duplicate_findings, [
-        *collect_issues,
-        *duplicate_issues,
-    ]
+    return renames, tags, issues, duplicate_findings, [*collect_issues, *duplicate_issues]
 
 
 def _enriched_review_plan(
@@ -301,11 +298,7 @@ def _standard_review_plan(
         cancel_event=cancel_event,
     )
     tags, coordination_issues, synchronized = coordinate_tag_proposals(renames, tags)
-    tag_issues = [
-        item
-        for item in tag_issues
-        if path_key(item.get("path", "")) not in synchronized
-    ]
+    tag_issues = [item for item in tag_issues if path_key(item.get("path", "")) not in synchronized]
     tag_issues.extend(coordination_issues)
     duplicate_findings = []
     duplicate_issues: list[ReviewIssue] = []
@@ -327,7 +320,8 @@ def _standard_review_plan(
     )
 
 
-def analyze_folder(
+# Preserve positional arguments supported by this public planner API.
+def analyze_folder(  # noqa: PLR0917
     folder_path: str,
     strategy: str | None = None,
     recursive: bool = True,

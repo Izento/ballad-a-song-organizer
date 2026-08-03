@@ -16,10 +16,7 @@ def _uses_online_extraction(
     strategy: str | None,
     acoustid_key: str | None,
 ) -> bool:
-    return bool(
-        acoustid_key
-        and strategy not in {"regular", "filename_norm", "musicbrainz"}
-    )
+    return bool(acoustid_key and strategy not in {"regular", "filename_norm", "musicbrainz"})
 
 
 def _extract_path(
@@ -127,9 +124,7 @@ def extract_tracks(
     extract: ExtractTrack = extract_track,
 ) -> dict[int, tuple[TrackInfo | None, Exception | None]]:
     """Extract tracks in order while pipelining online fingerprint work."""
-    if not paths or (
-        cancel_event is not None and cancel_event.is_set()
-    ):
+    if not paths or (cancel_event is not None and cancel_event.is_set()):
         return {}
     if not _uses_online_extraction(strategy, acoustid_key):
         return _extract_sequentially(

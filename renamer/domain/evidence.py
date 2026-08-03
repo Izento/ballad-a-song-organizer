@@ -64,9 +64,7 @@ class _FrozenList:
 
 def _freeze_json(value: Any) -> Any:
     if isinstance(value, Mapping):
-        return _FrozenMap(
-            tuple((str(key), _freeze_json(item)) for key, item in value.items())
-        )
+        return _FrozenMap(tuple((str(key), _freeze_json(item)) for key, item in value.items()))
     if isinstance(value, (list, tuple)):
         return _FrozenList(tuple(_freeze_json(item) for item in value))
     return value
@@ -86,10 +84,7 @@ class Evidence(Mapping[str, Any]):
     __slots__ = ("_items", "_lookup")
 
     def __init__(self, value: Mapping[str, Any] | None = None):
-        self._items = tuple(
-            (str(key), _freeze_json(item))
-            for key, item in (value or {}).items()
-        )
+        self._items = tuple((str(key), _freeze_json(item)) for key, item in (value or {}).items())
         self._lookup = dict(self._items)
 
     @classmethod
@@ -107,6 +102,9 @@ class Evidence(Mapping[str, Any]):
 
     def __eq__(self, other: object) -> bool:
         return isinstance(other, Mapping) and self.to_dict() == dict(other)
+
+    def __hash__(self) -> int:
+        return hash(self._items)
 
     def to_dict(self) -> dict[str, Any]:
         return {key: _thaw_json(item) for key, item in self._items}
@@ -144,9 +142,7 @@ class RecordingIdentity:
             artist=str(value.get("artist") or ""),
             title=str(value.get("title") or ""),
             exact_recording_id=str(value.get("exact_recording_id") or ""),
-            derived_from_recording_id=str(
-                value.get("derived_from_recording_id") or ""
-            ),
+            derived_from_recording_id=str(value.get("derived_from_recording_id") or ""),
             acoustid_score=value.get("acoustid_score"),
             confidence=Confidence(str(value.get("confidence") or "unresolved")),
             warnings=tuple(value.get("warnings") or ()),

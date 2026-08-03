@@ -7,6 +7,7 @@ import os
 import shutil
 import sys
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 
 APP_NAME = "SongOrganizer"
@@ -56,11 +57,13 @@ def resolve_fpcalc() -> str | None:
     candidates = []
     if getattr(sys, "frozen", False):
         candidates.append(Path(sys.executable).parent / "fpcalc.exe")
-    candidates.extend((
-        resource_path("fpcalc.exe"),
-        resource_path("bin") / "fpcalc.exe",
-        resource_path("fpcalc"),
-    ))
+    candidates.extend(
+        (
+            resource_path("fpcalc.exe"),
+            resource_path("bin") / "fpcalc.exe",
+            resource_path("fpcalc"),
+        )
+    )
     for candidate in candidates:
         if candidate.is_file():
             return str(candidate)
@@ -84,8 +87,8 @@ def resolve_acoustid_key() -> str | None:
         resource_path(".env"),
     ]
     seen: set[Path] = set()
-    for candidate in candidates:
-        candidate = candidate.resolve()
+    for candidate_path in candidates:
+        candidate = candidate_path.resolve()
         if candidate in seen or not candidate.is_file():
             continue
         seen.add(candidate)
@@ -110,10 +113,8 @@ def atomic_write_json(path: Path, value: dict) -> None:
             os.fsync(handle.fileno())
         os.replace(temp_name, path)
     finally:
-        try:
+        with suppress(FileNotFoundError):
             os.unlink(temp_name)
-        except FileNotFoundError:
-            pass
 
 
 __all__ = [

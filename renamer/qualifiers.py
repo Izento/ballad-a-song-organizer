@@ -75,35 +75,23 @@ def _is_instrumental_token(value: str) -> bool:
     word = value.casefold()
     if word in _INSTRUMENTAL_ABBREVIATIONS:
         return True
-    return (
-        9 <= len(word) <= 13
-        and SequenceMatcher(None, word, _INSTRUMENTAL).ratio() >= 0.9
-    )
+    return 9 <= len(word) <= 13 and SequenceMatcher(None, word, _INSTRUMENTAL).ratio() >= 0.9
 
 
 def normalize_instrumental_spelling(value: str) -> str:
     """Correct clear misspellings of the semantic Instrumental label."""
     return re.sub(
         r"[A-Za-z]+",
-        lambda match: (
-            "Instrumental"
-            if _is_instrumental_token(match.group())
-            else match.group()
-        ),
+        lambda match: "Instrumental" if _is_instrumental_token(match.group()) else match.group(),
         value or "",
     )
 
 
 def has_instrumental_qualifier(value: str) -> bool:
-    return any(
-        _is_instrumental_token(word)
-        for word in re.findall(r"[A-Za-z]+", value or "")
-    )
+    return any(_is_instrumental_token(word) for word in re.findall(r"[A-Za-z]+", value or ""))
 
 
-def _canonical_label(value: str) -> tuple[str, str]:
-    normalized = _clean(normalize_instrumental_spelling(value))
-    folded = normalized.casefold()
+def _identity_label(normalized: str, folded: str) -> tuple[str, str] | None:
     if _is_instrumental_token(folded):
         return "Instrumental", "instrumental"
     if _A_CAPPELLA_RE.search(normalized):
@@ -115,13 +103,20 @@ def _canonical_label(value: str) -> tuple[str, str]:
             "VIP" if not kind else f"VIP {kind.title()}",
             "vip",
         )
+    return None
+
+
+def _noise_label(normalized: str) -> tuple[str, str] | None:
     if _QUALITY_RE.fullmatch(normalized):
         return normalized.upper(), "quality"
     if _RELEASE_CONTEXT_RE.fullmatch(normalized):
         return normalized.title(), "release_context"
     if _PROMO_RE.fullmatch(normalized):
         return normalized, "promo"
+    return None
 
+
+def _version_or_unknown_label(normalized: str, folded: str) -> tuple[str, str]:
     words = folded.split()
     if "remix" in words or "remx" in words:
         return re.sub(r"\bremx\b", "Remix", normalized, flags=re.IGNORECASE), "remix"
@@ -147,6 +142,18 @@ def _canonical_label(value: str) -> tuple[str, str]:
     return normalized, "unknown"
 
 
+def _canonical_label(value: str) -> tuple[str, str]:
+    normalized = _clean(normalize_instrumental_spelling(value))
+    folded = normalized.casefold()
+    identity = _identity_label(normalized, folded)
+    if identity is not None:
+        return identity
+    noise = _noise_label(normalized)
+    if noise is not None:
+        return noise
+    return _version_or_unknown_label(normalized, folded)
+
+
 def parse_qualifiers(value: str) -> tuple[Qualifier, ...]:
     """Return explicitly annotated version, release-context, and noise labels."""
     text = value or ""
@@ -168,6 +175,7 @@ def has_explicit_variant(value: str) -> bool:
 
 def has_matching_qualifier(local: str, online: str) -> bool:
     """Compare meaningful local and online labels without treating noise as identity."""
+
     def identity_key(item: Qualifier) -> str:
         if item.kind != "version":
             return item.value.casefold()
@@ -191,14 +199,10 @@ def has_matching_qualifier(local: str, online: str) -> bool:
         return lowered
 
     local_values = {
-        identity_key(item)
-        for item in parse_qualifiers(local)
-        if item.is_recording_identity
+        identity_key(item) for item in parse_qualifiers(local) if item.is_recording_identity
     }
     online_values = {
-        identity_key(item)
-        for item in parse_qualifiers(online)
-        if item.is_recording_identity
+        identity_key(item) for item in parse_qualifiers(online) if item.is_recording_identity
     }
     if not local_values:
         return True
@@ -237,6 +241,7 @@ def split_version_qualifiers(title: str) -> tuple[str, tuple[str, ...]]:
 
 def remove_safe_noise(value: str) -> str:
     """Remove only isolated technical/release/promo blocks from a title candidate."""
+
     def replace(match: re.Match[str]) -> str:
         label, kind = _canonical_label(match.group(1))
         del label
@@ -248,11 +253,7 @@ def remove_safe_noise(value: str) -> str:
 
 def preserve_local_versions(local_title: str, online_title: str) -> str:
     """Append explicit local recording variants absent from online metadata."""
-    retained = [
-        item.value
-        for item in parse_qualifiers(local_title)
-        if item.is_recording_identity
-    ]
+    retained = [item.value for item in parse_qualifiers(local_title) if item.is_recording_identity]
     if has_instrumental_qualifier(local_title) and "Instrumental" not in retained:
         retained.append("Instrumental")
     known_title = online_title
@@ -264,9 +265,7 @@ def preserve_local_versions(local_title: str, online_title: str) -> str:
             known_title,
         )
     ]
-    return _clean(
-        " ".join([online_title, *(f"({value})" for value in missing)])
-    )
+    return _clean(" ".join([online_title, *(f"({value})" for value in missing)]))
 
 
 __all__ = [

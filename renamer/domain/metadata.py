@@ -30,10 +30,7 @@ class CanonicalMetadata(Mapping[str, Any]):
     __slots__ = ("_items", "_lookup")
 
     def __init__(self, values: MetadataInput = None):
-        items = tuple(
-            (str(key), _freeze_value(value))
-            for key, value in (values or {}).items()
-        )
+        items = tuple((str(key), _freeze_value(value)) for key, value in (values or {}).items())
         self._items = items
         self._lookup = dict(items)
 
@@ -56,16 +53,15 @@ class CanonicalMetadata(Mapping[str, Any]):
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Mapping):
             return self.to_dict() == {
-                str(key): _public_value(_freeze_value(value))
-                for key, value in other.items()
+                str(key): _public_value(_freeze_value(value)) for key, value in other.items()
             }
         return False
 
+    def __hash__(self) -> int:
+        return hash(self._items)
+
     def to_dict(self) -> dict[str, Any]:
-        return {
-            key: _public_value(value)
-            for key, value in self._items
-        }
+        return {key: _public_value(value) for key, value in self._items}
 
     def merged(self, values: MetadataInput) -> CanonicalMetadata:
         merged = self.to_dict()
