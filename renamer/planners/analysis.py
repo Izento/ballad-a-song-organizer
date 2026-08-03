@@ -131,6 +131,7 @@ def _run_enrichment(
     recursive: bool,
     acoustid_key: str | None,
     include_artwork: bool,
+    include_renames: bool = True,
     progress,
     cancel_event,
 ):
@@ -139,6 +140,7 @@ def _run_enrichment(
         recursive=recursive,
         acoustid_key=acoustid_key,
         include_artwork=include_artwork,
+        include_renames=include_renames,
         progress=progress,
         cancel_event=cancel_event,
     )
@@ -178,6 +180,7 @@ def analyze_folder(
     fingerprint: bool = False,
     enrich_metadata: bool = False,
     include_artwork: bool = True,
+    include_renames: bool = True,
     progress: ProgressCallback | None = None,
     cancel_event=None,
 ) -> ReviewPlan:
@@ -205,6 +208,7 @@ def analyze_folder(
                     recursive=recursive,
                     acoustid_key=acoustid_key,
                     include_artwork=include_artwork,
+                    include_renames=include_renames,
                     progress=progress,
                     cancel_event=cancel_event,
                 )
@@ -221,6 +225,7 @@ def analyze_folder(
                 recursive=recursive,
                 acoustid_key=acoustid_key,
                 include_artwork=include_artwork,
+                include_renames=include_renames,
                 progress=progress,
                 cancel_event=cancel_event,
             )
@@ -233,14 +238,18 @@ def analyze_folder(
             duplicate_findings=duplicate_findings,
             issues=[*issues, *duplicate_issues],
         )
-    renames, rename_issues = plan_renames(
-        folder_path,
-        strategy=strategy,
-        recursive=recursive,
-        lookup=lookup,
-        acoustid_key=acoustid_key,
-        progress=progress,
-        cancel_event=cancel_event,
+    renames, rename_issues = (
+        plan_renames(
+            folder_path,
+            strategy=strategy,
+            recursive=recursive,
+            lookup=lookup,
+            acoustid_key=acoustid_key,
+            progress=progress,
+            cancel_event=cancel_event,
+        )
+        if include_renames
+        else ([], [])
     )
     tags, tag_issues = plan_tag_updates(
         folder_path,

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import io
 import json
 import os
 import queue
@@ -10,11 +12,23 @@ from dataclasses import replace
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
+from typing import Any
 
+from PIL import Image, ImageTk
+
+from renamer.media import read_front_artwork
+
+from renamer.domain.issues import ReviewIssue
+from renamer.quarantine import (
+    load_quarantine,
+    quarantine_file,
+    unquarantine_files,
+)
 from renamer.apply import (
     batch_history,
     batches_requiring_recovery,
     latest_undoable_batch,
+    undo_batch,
 )
 from renamer.review_api import (
     coordinate_tag_proposals,
@@ -60,7 +74,7 @@ _TREE_STYLE = "Ballad.Treeview"
 _PRIMARY_BUTTON_BG = "#238636"
 _PRIMARY_BUTTON_ACTIVE_BG = "#2ea043"
 _PRIMARY_BUTTON_DISABLED_FG = "#d3f4dc"
-_ACTIVITY_SIDEBAR_WIDTH = 320
+_ACTIVITY_SIDEBAR_WIDTH = 360
 _ACTIVITY_COLLAPSED_WIDTH = 82
 _SHIFT_MASK = 0x0001
 _SHARED_ARTWORK_PREVIEW_LIMIT = 8
@@ -266,6 +280,7 @@ class SongOrganizerApp:
             value=bool(self.acoustid_key and fpcalc_path)
         )
         self.cover_art_var = tk.BooleanVar(value=True)
+        self.propose_renames_var = tk.BooleanVar(value=False)
         fpcalc_state = (
             "available" if fpcalc_path else "not installed (optional)"
         )
@@ -396,6 +411,17 @@ class SongOrganizerApp:
             "Download and embed front cover art from the Cover Art Archive "
             "for files that don't already have any.",
         )
+        self.propose_renames_check = ttk.Checkbutton(
+            options,
+            text="Propose filename changes",
+            variable=self.propose_renames_var,
+        )
+        self.propose_renames_check.pack(side=tk.LEFT, padx=(16, 0))
+        _add_tooltip(
+            self.propose_renames_check,
+            "Suggest renaming files on disk based on enriched metadata. "
+            "When unchecked, Ballad enriches tags and embeds cover art without changing filenames.",
+        )
         self.duplicate_check_check = ttk.Checkbutton(
             options,
             text="Check for duplicate files",
@@ -490,6 +516,10 @@ class SongOrganizerApp:
             secondary_actions, text="History", command=self._show_history
         )
         self.history_button.pack(side=tk.LEFT)
+        self.quarantine_button = ttk.Button(
+            secondary_actions, text="Quarantine", command=self._handle_quarantine_button_click
+        )
+        self.quarantine_button.pack(side=tk.LEFT, padx=(8, 0))
         self.undo_button = ttk.Button(
             secondary_actions, text="Undo latest", command=self._undo_latest
         )
@@ -518,6 +548,7 @@ class SongOrganizerApp:
         self._update_primary_button()
 
     def _build_activity_sidebar(self, parent: ttk.Frame) -> None:
+        self._preview_images: list[Any] = []
         self.activity_container = ttk.Frame(
             parent,
             width=_ACTIVITY_SIDEBAR_WIDTH,
@@ -532,36 +563,35 @@ class SongOrganizerApp:
         self.activity_container.columnconfigure(0, weight=1)
         self.activity_container.rowconfigure(0, weight=1)
 
-        self.activity_panel = ttk.Labelframe(
-            self.activity_container,
-            text="Activity log",
-            padding=6,
-        )
-        self.activity_panel.grid(row=0, column=0, sticky=tk.NSEW)
-        self.activity_panel.columnconfigure(0, weight=1)
-        self.activity_panel.rowconfigure(1, weight=1)
+        self.sidebar_panel = ttk.Frame(self.activity_container)
+        self.sidebar_panel.grid(row=0, column=0, sticky=tk.NSEW)
+        self.sidebar_panel.columnconfigure(0, weight=1)
+        self.sidebar_panel.rowconfigure(0, weight=1)
 
-        header = ttk.Frame(self.activity_panel)
-        header.grid(row=0, column=0, sticky=tk.EW, pady=(0, 6))
-        header.columnconfigure(0, weight=1)
+        self.sidebar_notebook = ttk.Notebook(self.sidebar_panel)
+        self.sidebar_notebook.grid(row=0, column=0, sticky=tk.NSEW)
+
+        # Tab 1: Activity
+        self.activity_tab = ttk.Frame(self.sidebar_notebook, padding=6)
+        self.sidebar_notebook.add(self.activity_tab, text="Activity")
+
+        activity_header = ttk.Frame(self.activity_tab)
+        activity_header.pack(fill=tk.X, pady=(0, 6))
         ttk.Label(
-            header,
+            activity_header,
             text="Live progress",
-        ).grid(row=0, column=0, sticky=tk.W)
-        collapse_button = ttk.Button(
-            header,
+            font=("TkDefaultFont", 9, "bold"),
+        ).pack(side=tk.LEFT)
+        collapse_btn1 = ttk.Button(
+            activity_header,
             text="Collapse",
             command=self._toggle_activity_sidebar,
         )
-        collapse_button.grid(row=0, column=1, sticky=tk.E)
-        _add_tooltip(
-            collapse_button,
-            "Hide the activity log. The log will remain available until "
-            "you show it again.",
-        )
+        collapse_btn1.pack(side=tk.RIGHT)
+        _add_tooltip(collapse_btn1, "Collapse the activity sidebar.")
 
-        log_frame = ttk.Frame(self.activity_panel)
-        log_frame.grid(row=1, column=0, sticky=tk.NSEW)
+        log_frame = ttk.Frame(self.activity_tab)
+        log_frame.pack(fill=tk.BOTH, expand=True)
         log_frame.columnconfigure(0, weight=1)
         log_frame.rowconfigure(0, weight=1)
         self.activity_log = tk.Text(
@@ -581,20 +611,77 @@ class SongOrganizerApp:
         scrollbar.grid(row=0, column=1, sticky=tk.NS)
         self.activity_log.configure(yscrollcommand=scrollbar.set)
 
+        # Tab 2: Review details
+        self.details_tab = ttk.Frame(self.sidebar_notebook, padding=6)
+        self.sidebar_notebook.add(self.details_tab, text="Review details")
+
+        details_header = ttk.Frame(self.details_tab)
+        details_header.pack(fill=tk.X, pady=(0, 6))
+        ttk.Label(
+            details_header,
+            text="Proposal Inspector",
+            font=("TkDefaultFont", 9, "bold"),
+        ).pack(side=tk.LEFT)
+        collapse_btn2 = ttk.Button(
+            details_header,
+            text="Collapse",
+            command=self._toggle_activity_sidebar,
+        )
+        collapse_btn2.pack(side=tk.RIGHT)
+        _add_tooltip(collapse_btn2, "Collapse the activity sidebar.")
+
+        details_canvas_frame = ttk.Frame(self.details_tab)
+        details_canvas_frame.pack(fill=tk.BOTH, expand=True)
+        details_canvas_frame.columnconfigure(0, weight=1)
+        details_canvas_frame.rowconfigure(0, weight=1)
+
+        self.details_canvas = tk.Canvas(details_canvas_frame, highlightthickness=0)
+        self.details_scrollbar = ttk.Scrollbar(
+            details_canvas_frame,
+            orient=tk.VERTICAL,
+            command=self.details_canvas.yview,
+        )
+        self.details_content = ttk.Frame(self.details_canvas)
+        self.details_content.bind(
+            "<Configure>",
+            lambda e: self.details_canvas.configure(
+                scrollregion=self.details_canvas.bbox("all")
+            ),
+        )
+        self.details_canvas_window = self.details_canvas.create_window(
+            (0, 0), window=self.details_content, anchor="nw"
+        )
+        self.details_canvas.configure(yscrollcommand=self.details_scrollbar.set)
+        self.details_canvas.bind(
+            "<Configure>",
+            lambda e: self.details_canvas.itemconfig(
+                self.details_canvas_window, width=e.width
+            ),
+        )
+        self.details_canvas.grid(row=0, column=0, sticky=tk.NSEW)
+        self.details_scrollbar.grid(row=0, column=1, sticky=tk.NS)
+
+        def _on_mousewheel(event):
+            self.details_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+
+        self.details_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
         self.activity_show_button = ttk.Button(
             self.activity_container,
-            text="Show log",
+            text="Show sidebar",
             command=self._toggle_activity_sidebar,
             padding=(2, 2),
         )
         _add_tooltip(
             self.activity_show_button,
-            "Show the live activity log.",
+            "Show the live activity & review sidebar.",
         )
+
+        self._update_review_details(None)
 
     def _toggle_activity_sidebar(self) -> None:
         if self._activity_sidebar_open:
-            self.activity_panel.grid_remove()
+            self.sidebar_panel.grid_remove()
             self.activity_show_button.grid(
                 row=0,
                 column=0,
@@ -604,9 +691,227 @@ class SongOrganizerApp:
             self.activity_container.configure(width=_ACTIVITY_COLLAPSED_WIDTH)
         else:
             self.activity_show_button.grid_remove()
-            self.activity_panel.grid(row=0, column=0, sticky=tk.NSEW)
+            self.sidebar_panel.grid(row=0, column=0, sticky=tk.NSEW)
             self.activity_container.configure(width=_ACTIVITY_SIDEBAR_WIDTH)
         self._activity_sidebar_open = not self._activity_sidebar_open
+
+    def _on_tree_select(self, tree_name: str, event=None) -> None:
+        tree = self.trees.get(tree_name)
+        if not tree:
+            return
+        selection = tree.selection()
+        if not selection:
+            return
+        row = selection[0]
+        item_id = self._row_ids.get((tree_name, row))
+        if not item_id:
+            return
+        proposal = self._proposal_for_id(item_id)
+        if proposal is not None:
+            self._update_review_details(proposal)
+
+    def _load_tk_image_bytes(self, data: bytes, max_size=(110, 110)):
+        try:
+            img = Image.open(io.BytesIO(data))
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
+    def _load_tk_image_file(self, file_path: str, max_size=(110, 110)):
+        try:
+            img = Image.open(file_path)
+            img.thumbnail(max_size, Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(img)
+        except Exception:
+            return None
+
+    def _update_review_details(self, proposal: Any) -> None:
+        for child in self.details_content.winfo_children():
+            child.destroy()
+        self._preview_images.clear()
+
+        if proposal is None:
+            lbl = ttk.Label(
+                self.details_content,
+                text="Select a song proposal in the table to inspect local tags, MusicBrainz evidence, warnings, and artwork.",
+                wraplength=320,
+                justify=tk.LEFT,
+                padding=10,
+            )
+            lbl.pack(fill=tk.X)
+            return
+
+        container = ttk.Frame(self.details_content, padding=4)
+        container.pack(fill=tk.BOTH, expand=True)
+
+        file_path = getattr(proposal, "path", None) or getattr(proposal, "old_path", None) or ""
+        file_name = Path(file_path).name if file_path else "Unknown file"
+
+        lbl_title = ttk.Label(
+            container,
+            text=file_name,
+            font=("TkDefaultFont", 10, "bold"),
+            wraplength=320,
+        )
+        lbl_title.pack(anchor=tk.W, pady=(0, 2))
+
+        conf = str(getattr(proposal, "confidence", "medium")).upper()
+        status_text = f"Confidence: {conf}"
+        conf_color = {
+            "HIGH": "green",
+            "MEDIUM": "#b8860b",
+            "LOW": "red",
+            "BLOCKING": "red",
+        }.get(conf, "black")
+
+        conf_frame = ttk.Frame(container)
+        conf_frame.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(
+            conf_frame,
+            text=status_text,
+            foreground=conf_color,
+            font=("TkDefaultFont", 9, "bold"),
+        ).pack(side=tk.LEFT)
+
+        issues = getattr(proposal, "review_issues", ()) or ()
+        warnings = getattr(proposal, "warnings", ()) or ()
+        if issues or warnings:
+            warn_box = ttk.Labelframe(container, text="Warnings & Issues", padding=6)
+            warn_box.pack(fill=tk.X, pady=(0, 8))
+            for issue in issues:
+                msg = getattr(issue, "message", str(issue))
+                lbl_warn = ttk.Label(
+                    warn_box,
+                    text=f"• {msg}",
+                    foreground="red" if not getattr(issue, "apply_eligible", True) else "#d9534f",
+                    wraplength=300,
+                    justify=tk.LEFT,
+                )
+                lbl_warn.pack(anchor=tk.W, pady=1)
+            for w in warnings:
+                if not any(w in getattr(i, "message", "") for i in issues):
+                    lbl_w = ttk.Label(
+                        warn_box,
+                        text=f"• {w}",
+                        foreground="#d9534f",
+                        wraplength=300,
+                        justify=tk.LEFT,
+                    )
+                    lbl_w.pack(anchor=tk.W, pady=1)
+
+        meta_box = ttk.Labelframe(container, text="Metadata Proposal", padding=6)
+        meta_box.pack(fill=tk.X, pady=(0, 8))
+
+        if hasattr(proposal, "before") and hasattr(proposal, "after"):
+            before = proposal.before
+            after = proposal.after
+            fields = [
+                ("Artist", before.get("artist"), after.get("artist")),
+                ("Title", before.get("title"), after.get("title")),
+                ("Album", before.get("album"), after.get("album")),
+                ("Track", before.get("track_number"), after.get("track_number")),
+            ]
+            for label, b_val, a_val in fields:
+                if b_val or a_val:
+                    row = ttk.Frame(meta_box)
+                    row.pack(fill=tk.X, pady=2)
+                    ttk.Label(row, text=f"{label}:", font=("TkDefaultFont", 9, "bold"), width=8).pack(side=tk.LEFT)
+                    val_str = f"{b_val or '(none)'}  ➔  {a_val or '(none)'}" if b_val != a_val else f"{a_val or '(unchanged)'}"
+                    ttk.Label(row, text=val_str, wraplength=230, justify=tk.LEFT).pack(side=tk.LEFT)
+
+        if hasattr(proposal, "old_path") and hasattr(proposal, "new_path"):
+            old_name = Path(proposal.old_path).name
+            new_name = Path(proposal.new_path).name
+            row = ttk.Frame(meta_box)
+            row.pack(fill=tk.X, pady=2)
+            ttk.Label(row, text="Filename:", font=("TkDefaultFont", 9, "bold"), width=8).pack(side=tk.LEFT)
+            val_str = f"{old_name}\n➔ {new_name}" if old_name != new_name else f"{new_name}"
+            ttk.Label(row, text=val_str, wraplength=230, justify=tk.LEFT).pack(side=tk.LEFT)
+
+        ev = getattr(proposal, "evidence", None)
+        ev_dict = ev.to_dict() if hasattr(ev, "to_dict") else (ev if isinstance(ev, dict) else {})
+        ident = ev_dict.get("identification") or {}
+        mb = ev_dict.get("musicbrainz") or {}
+
+        if ident or mb:
+            ev_box = ttk.Labelframe(container, text="Provider Evidence", padding=6)
+            ev_box.pack(fill=tk.X, pady=(0, 8))
+
+            if ident.get("score"):
+                score = ident.get("score")
+                score_str = f"{int(score * 100)}%" if isinstance(score, float) and score <= 1.0 else f"{score}%" if isinstance(score, (int, float)) else str(score)
+                ttk.Label(ev_box, text=f"AcoustID Match: {score_str}", font=("TkDefaultFont", 9, "bold")).pack(anchor=tk.W)
+
+            if mb.get("recording_id"):
+                ttk.Label(ev_box, text=f"MB Recording ID:\n{mb.get('recording_id')}", font=("TkDefaultFont", 8)).pack(anchor=tk.W, pady=(2, 0))
+            if mb.get("release_id"):
+                ttk.Label(ev_box, text=f"MB Release ID:\n{mb.get('release_id')}", font=("TkDefaultFont", 8)).pack(anchor=tk.W, pady=(2, 0))
+            if mb.get("release"):
+                ttk.Label(ev_box, text=f"Release: {mb.get('release')}", wraplength=300).pack(anchor=tk.W, pady=(2, 0))
+            if mb.get("date"):
+                ttk.Label(ev_box, text=f"Release Date: {mb.get('date')}").pack(anchor=tk.W, pady=(2, 0))
+        else:
+            ev_box = ttk.Labelframe(container, text="Provider Evidence", padding=6)
+            ev_box.pack(fill=tk.X, pady=(0, 8))
+            ttk.Label(ev_box, text="No online provider evidence attached.", foreground="gray").pack(anchor=tk.W)
+
+        art_box = ttk.Labelframe(container, text="Cover Art Inspection", padding=6)
+        art_box.pack(fill=tk.X, pady=(0, 8))
+
+        art_row = ttk.Frame(art_box)
+        art_row.pack(fill=tk.X)
+
+        curr_frame = ttk.Frame(art_row)
+        curr_frame.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, padx=2)
+        ttk.Label(curr_frame, text="Current Embedded", font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.N)
+
+        current_art = (
+            read_front_artwork(file_path)
+            if file_path and os.path.isfile(file_path)
+            else None
+        )
+        current_art_bytes, _ = current_art or (None, "")
+        if current_art_bytes:
+            curr_sha = hashlib.sha256(current_art_bytes).hexdigest()
+            art_before = getattr(proposal, "artwork_before", None)
+            stale = False
+            if art_before and getattr(art_before, "sha256", "") and art_before.sha256 != curr_sha:
+                stale = True
+
+            tk_img = self._load_tk_image_bytes(current_art_bytes)
+            if tk_img:
+                self._preview_images.append(tk_img)
+                lbl_img = ttk.Label(curr_frame, image=tk_img)
+                lbl_img.pack(pady=4)
+                status_lbl = "Embedded (Stale)" if stale else "Embedded Cover"
+                color = "#d9534f" if stale else "gray"
+                ttk.Label(curr_frame, text=status_lbl, font=("TkDefaultFont", 7), foreground=color).pack(anchor=tk.N)
+            else:
+                ttk.Label(curr_frame, text="[Image decode error]", foreground="red").pack(pady=10)
+        else:
+            ttk.Label(curr_frame, text="[No cover art]", foreground="gray").pack(pady=20)
+
+        staged_frame = ttk.Frame(art_row)
+        staged_frame.pack(side=tk.LEFT, expand=True, fill=tk.BOTH, padx=2)
+        ttk.Label(staged_frame, text="Proposed Replacement", font=("TkDefaultFont", 8, "bold")).pack(anchor=tk.N)
+
+        art_after = getattr(proposal, "artwork_after", None)
+        staged_path = getattr(art_after, "path", None) if art_after else None
+        if staged_path and os.path.isfile(staged_path):
+            tk_staged = self._load_tk_image_file(staged_path)
+            if tk_staged:
+                self._preview_images.append(tk_staged)
+                lbl_staged = ttk.Label(staged_frame, image=tk_staged)
+                lbl_staged.pack(pady=4)
+                rel_id = getattr(art_after, "release_id", "")
+                src_url = getattr(art_after, "source_url", "")
+                sub_txt = f"Release: {rel_id[:8]}..." if rel_id else ("CAA Source" if src_url else "Proposed")
+                ttk.Label(staged_frame, text=sub_txt, font=("TkDefaultFont", 7), foreground="green").pack(anchor=tk.N)
+            else:
+                ttk.Label(staged_frame, text="[Decode error]", foreground="red").pack(pady=10)
+        else:
+            ttk.Label(staged_frame, text="[No change]", foreground="gray").pack(pady=20)
 
     def _clear_activity_log(self) -> None:
         self.activity_log.configure(state=tk.NORMAL)
@@ -732,6 +1037,10 @@ class SongOrganizerApp:
             lambda event, name=key: self._handle_tree_click(name, event),
         )
         tree.bind(
+            "<<TreeviewSelect>>",
+            lambda event, name=key: self._on_tree_select(name, event),
+        )
+        tree.bind(
             "<Double-Button-1>",
             lambda event, name=key: self._handle_tree_double_click(name, event),
         )
@@ -814,11 +1123,13 @@ class SongOrganizerApp:
             )
         )
         self.cover_art_check.configure(state=state)
+        self.propose_renames_check.configure(state=state)
         self.duplicate_check_check.configure(state=state)
         self._sync_fingerprint_availability(busy=busy)
         self.edit_button.configure(state=state)
         self.cancel_button.configure(state=tk.NORMAL if busy else tk.DISABLED)
         self.history_button.configure(state=state)
+        self.quarantine_button.configure(state=state)
         self.undo_button.configure(state=state)
         if busy:
             self.primary_button.configure(state=tk.DISABLED)
@@ -875,6 +1186,7 @@ class SongOrganizerApp:
             acoustid_key=acoustid_key,
             include_artwork=self.cover_art_var.get(),
             include_duplicates=self._last_run_checked_duplicates,
+            include_renames=self.propose_renames_var.get(),
         )
 
     def _apply(self) -> None:
@@ -957,26 +1269,308 @@ class SongOrganizerApp:
         self._set_busy(True)
         self.jobs.undo(batch["batch_id"])
 
+    def _selected_proposals_in_active_tree(self) -> list[Any]:
+        active_tab_key = self._active_action_scope()
+        if active_tab_key not in {"renames", "tags"}:
+            active_tab_key = "renames" if self.plan and self.plan.rename_proposals else "tags"
+        tree = self.trees.get(active_tab_key)
+        proposals = []
+        seen_ids = set()
+        row_ids = getattr(self, "_row_ids", {})
+        if tree:
+            selected_rows = tree.selection()
+            for row in selected_rows:
+                item_id = row_ids.get((active_tab_key, row))
+                if item_id and item_id not in seen_ids:
+                    seen_ids.add(item_id)
+                    p = self._proposal_for_id(item_id)
+                    if p is not None:
+                        proposals.append(p)
+        if not proposals and self.plan is not None:
+            for item in _action_items(self.plan):
+                if item.id in self.selected_ids and item.id not in seen_ids:
+                    seen_ids.add(item.id)
+                    proposals.append(item)
+        return proposals
+
+    def _quarantine_proposal(self, proposal) -> None:
+        self._quarantine_proposals([proposal])
+
+    def _quarantine_proposals(self, proposals: list[Any]) -> None:
+        if not proposals:
+            return
+
+        valid_proposals = []
+        seen_paths = set()
+        for p in proposals:
+            target_path = getattr(p, "path", None) or getattr(p, "old_path", None)
+            if target_path and target_path not in seen_paths:
+                seen_paths.add(target_path)
+                valid_proposals.append((p, target_path))
+
+        if not valid_proposals:
+            return
+
+        count = len(valid_proposals)
+        if count == 1:
+            p, target_path = valid_proposals[0]
+            file_name = Path(target_path).name
+            confirm_msg = (
+                f"Ignore future online matches for '{file_name}'?\n\n"
+                "Ballad will save this choice and skip online identification for this file on future runs. "
+                "You can clear this anytime in Quarantine manager."
+            )
+        else:
+            confirm_msg = (
+                f"Ignore future online matches for {count} selected files?\n\n"
+                "Ballad will save these choices and skip online identification for these files on future runs. "
+                "You can clear these anytime in Quarantine manager."
+            )
+
+        if not messagebox.askyesno("Ignore matches in future", confirm_msg):
+            return
+
+        quarantined_count = 0
+        quarantined_group_ids = set()
+        new_issues = list(self.plan.issues) if self.plan is not None else []
+
+        for p, target_path in valid_proposals:
+            artist = ""
+            title = ""
+            if hasattr(p, "after"):
+                artist = str(p.after.get("artist") or "")
+                title = str(p.after.get("title") or "")
+            elif hasattr(p, "proposed_values"):
+                artist = str(p.proposed_values.get("artist") or "")
+                title = str(p.proposed_values.get("title") or "")
+
+            quarantine_file(
+                target_path,
+                artist=artist,
+                title=title,
+                reason="Ignored by user during review",
+            )
+            quarantined_count += 1
+            quarantined_group_ids.add(p.decision_group_id)
+
+            new_issues.append(
+                ReviewIssue.from_dict({
+                    "category": "quarantined",
+                    "path": target_path,
+                    "message": "Match ignored by user quarantine.",
+                })
+            )
+
+        if self.plan is not None:
+            new_renames = [
+                r for r in self.plan.rename_proposals
+                if r.decision_group_id not in quarantined_group_ids
+            ]
+            new_tags = [
+                t for t in self.plan.tag_proposals
+                if t.decision_group_id not in quarantined_group_ids
+            ]
+
+            quarantined_action_ids = set()
+            grouped_actions = _grouped_action_ids(self.plan)
+            for gid in quarantined_group_ids:
+                quarantined_action_ids.update(grouped_actions.get(gid, set()))
+
+            self.selected_ids -= quarantined_action_ids
+            self.plan = self.plan.with_proposals(new_renames, new_tags)
+            self.plan = replace(self.plan, issues=tuple(new_issues), digest="")
+            self.plan = replace(self.plan, digest=self.plan._computed_digest())
+            self._populate_plan(self.plan)
+            self._update_primary_button()
+
+        self.status_var.set(f"Added {quarantined_count} file(s) to quarantine.")
+
+    def _handle_quarantine_button_click(self) -> None:
+        proposals = self._selected_proposals_in_active_tree()
+        if proposals:
+            self._quarantine_proposals(proposals)
+        else:
+            self._show_quarantine_manager()
+
+    def _show_quarantine_manager(self) -> None:
+        window = tk.Toplevel(self.root)
+        window.title(f"{GUI_TITLE} quarantine")
+        window.geometry("780x380")
+
+        tree_frame = ttk.Frame(window, padding=10)
+        tree_frame.pack(fill=tk.BOTH, expand=True)
+        tree_frame.columnconfigure(0, weight=1)
+        tree_frame.rowconfigure(0, weight=1)
+
+        columns = ("file", "artist_title", "date")
+        tree = ttk.Treeview(tree_frame, columns=columns, show="headings", selectmode="extended")
+        tree.heading("file", text="File")
+        tree.heading("artist_title", text="Ignored Match")
+        tree.heading("date", text="Date")
+        tree.column("file", width=320)
+        tree.column("artist_title", width=280)
+        tree.column("date", width=140)
+
+        def populate_tree():
+            tree.delete(*tree.get_children())
+            current_items = load_quarantine()
+            for item in current_items:
+                f_name = Path(item.get("path", "")).name
+                artist_title = " / ".join(filter(None, [item.get("artist"), item.get("title")])) or "Ignored"
+                dt = _format_local_timestamp(item.get("created_at", ""))
+                tree.insert("", tk.END, iid=path_key(item.get("path", "")), values=(f_name, artist_title, dt))
+
+        populate_tree()
+
+        scrollbar = ttk.Scrollbar(tree_frame, orient=tk.VERTICAL, command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        tree.grid(row=0, column=0, sticky=tk.NSEW)
+        scrollbar.grid(row=0, column=1, sticky=tk.NS)
+
+        bottom = ttk.Frame(window, padding=(10, 0, 10, 10))
+        bottom.pack(fill=tk.X)
+
+        def remove_selected():
+            selected = tree.selection()
+            if not selected:
+                return
+            removed = unquarantine_files(list(selected))
+            if removed > 0:
+                populate_tree()
+                self.status_var.set(f"Removed {removed} file(s) from quarantine.")
+
+        ttk.Button(bottom, text="Clear selected", command=remove_selected).pack(side=tk.LEFT)
+        ttk.Button(bottom, text="Close", command=window.destroy).pack(side=tk.RIGHT)
+
     def _show_history(self) -> None:
         batches = batch_history()
         window = tk.Toplevel(self.root)
-        window.title(f"{GUI_TITLE} history")
-        window.geometry("760x360")
-        listbox = tk.Listbox(window)
-        listbox.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        for batch in batches:
-            listbox.insert(
-                tk.END,
-                f"{batch.get('status', 'unknown'):18} "
-                f"{_format_local_timestamp(batch.get('created_at', ''))}  "
-                f"{batch.get('root', '')}",
-            )
-        ttk.Label(
-            window,
-            text="Undo latest restores completed actions from the newest "
-            "completed or interrupted batch. Restore remains guarded by "
-            "the batch journal.",
-        ).pack(fill=tk.X, padx=10, pady=(0, 10))
+        window.title(f"{GUI_TITLE} history & restoration")
+        window.geometry("880x460")
+
+        paned = ttk.PanedWindow(window, orient=tk.HORIZONTAL)
+        paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        # Left pane: Batches
+        left_frame = ttk.Labelframe(paned, text="Applied Batches", padding=6)
+        paned.add(left_frame, weight=1)
+        left_frame.columnconfigure(0, weight=1)
+        left_frame.rowconfigure(0, weight=1)
+
+        batch_cols = ("status", "date", "root")
+        batch_tree = ttk.Treeview(left_frame, columns=batch_cols, show="headings", selectmode="browse")
+        batch_tree.heading("status", text="Status")
+        batch_tree.heading("date", text="Date")
+        batch_tree.heading("root", text="Folder")
+        batch_tree.column("status", width=90)
+        batch_tree.column("date", width=130)
+        batch_tree.column("root", width=180)
+
+        batch_scrollbar = ttk.Scrollbar(left_frame, orient=tk.VERTICAL, command=batch_tree.yview)
+        batch_tree.configure(yscrollcommand=batch_scrollbar.set)
+        batch_tree.grid(row=0, column=0, sticky=tk.NSEW)
+        batch_scrollbar.grid(row=0, column=1, sticky=tk.NS)
+
+        # Right pane: Actions in selected batch
+        right_frame = ttk.Labelframe(paned, text="Changed Files in Batch", padding=6)
+        paned.add(right_frame, weight=2)
+        right_frame.columnconfigure(0, weight=1)
+        right_frame.rowconfigure(0, weight=1)
+
+        action_cols = ("file", "action", "status")
+        action_tree = ttk.Treeview(right_frame, columns=action_cols, show="headings", selectmode="extended")
+        action_tree.heading("file", text="File / Target")
+        action_tree.heading("action", text="Kind")
+        action_tree.heading("status", text="Status")
+        action_tree.column("file", width=280)
+        action_tree.column("action", width=70)
+        action_tree.column("status", width=80)
+
+        action_scrollbar = ttk.Scrollbar(right_frame, orient=tk.VERTICAL, command=action_tree.yview)
+        action_tree.configure(yscrollcommand=action_scrollbar.set)
+        action_tree.grid(row=0, column=0, sticky=tk.NSEW)
+        action_scrollbar.grid(row=0, column=1, sticky=tk.NS)
+
+        batch_data_map = {}
+        for b in batches:
+            bid = b.get("batch_id", "")
+            if not bid:
+                continue
+            batch_data_map[bid] = b
+            st = b.get("status", "unknown")
+            dt = _format_local_timestamp(b.get("created_at", ""))
+            rt = b.get("root", "")
+            batch_tree.insert("", tk.END, iid=bid, values=(st, dt, rt))
+
+        action_group_map = {}
+
+        def on_batch_select(event=None):
+            action_tree.delete(*action_tree.get_children())
+            action_group_map.clear()
+            sel = batch_tree.selection()
+            if not sel:
+                return
+            bid = sel[0]
+            bdata = batch_data_map.get(bid)
+            if not bdata:
+                return
+            actions = bdata.get("actions", [])
+            for idx, act in enumerate(actions):
+                f_path = act.get("path") or act.get("new") or act.get("old") or "File"
+                f_name = Path(f_path).name
+                kind = act.get("kind", "")
+                st = act.get("status", "")
+                group_id = act.get("decision_group_id") or path_key(f_path)
+                iid = f"act_{idx}"
+                action_group_map[iid] = group_id
+                action_tree.insert("", tk.END, iid=iid, values=(f_name, kind, st))
+
+        batch_tree.bind("<<TreeviewSelect>>", on_batch_select)
+
+        bottom = ttk.Frame(window, padding=(10, 0, 10, 10))
+        bottom.pack(fill=tk.X)
+
+        def restore_selected_files():
+            bsel = batch_tree.selection()
+            asel = action_tree.selection()
+            if not bsel or not asel:
+                messagebox.showinfo("Selection required", "Select a batch and at least one file to restore.")
+                return
+            bid = bsel[0]
+            group_ids = {action_group_map[iid] for iid in asel if iid in action_group_map}
+            if not group_ids:
+                return
+            if not messagebox.askyesno(
+                "Restore selected files",
+                f"Restore {len(group_ids)} selected file(s) from batch history?",
+            ):
+                return
+            results = undo_batch(bid, decision_group_ids=group_ids)
+            succeeded = sum(1 for r in results if r.status == "succeeded")
+            messagebox.showinfo("Restoration complete", f"Successfully restored {succeeded} file(s).")
+            window.destroy()
+            self.status_var.set(f"Restored {succeeded} file(s) from history.")
+
+        def restore_entire_batch():
+            bsel = batch_tree.selection()
+            if not bsel:
+                messagebox.showinfo("Selection required", "Select a batch to restore.")
+                return
+            bid = bsel[0]
+            if not messagebox.askyesno(
+                "Restore entire batch",
+                "Restore all changes from this batch in history?",
+            ):
+                return
+            results = undo_batch(bid)
+            succeeded = sum(1 for r in results if r.status == "succeeded")
+            messagebox.showinfo("Restoration complete", f"Successfully restored batch ({succeeded} actions).")
+            window.destroy()
+            self.status_var.set(f"Restored batch ({succeeded} actions).")
+
+        ttk.Button(bottom, text="Restore selected file(s)", command=restore_selected_files).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Button(bottom, text="Restore entire batch", command=restore_entire_batch).pack(side=tk.LEFT)
+        ttk.Button(bottom, text="Close", command=window.destroy).pack(side=tk.RIGHT)
 
     def _poll_events(self) -> None:
         try:
@@ -1004,6 +1598,10 @@ class SongOrganizerApp:
                 _requires_review(item)
                 for item in actions
             )
+            if self.plan.tag_proposals:
+                self.notebook.select(self.tabs["tags"])
+            elif self.plan.rename_proposals:
+                self.notebook.select(self.tabs["renames"])
             if not actions and self.plan.issues:
                 self.notebook.select(self.tabs["errors"])
                 self.status_var.set(
@@ -1236,14 +1834,42 @@ class SongOrganizerApp:
             label="Open in File Explorer",
             command=lambda: self._open_in_file_explorer(path),
         )
+
         row_ids = getattr(self, "_row_ids", {})
-        proposal = self._proposal_for_id(row_ids.get((tree_name, row), ""))
-        if tree_name == "tags" and proposal is not None and proposal.evidence:
+        selected_rows = list(tree.selection()) if row in tree.selection() else [row]
+        selected_proposals = []
+        seen_ids = set()
+        for r in selected_rows:
+            item_id = row_ids.get((tree_name, r), "")
+            if item_id and item_id not in seen_ids:
+                seen_ids.add(item_id)
+                p = self._proposal_for_id(item_id)
+                if p is not None:
+                    selected_proposals.append(p)
+
+        if selected_proposals:
             menu.add_separator()
-            menu.add_command(
-                label="Show metadata evidence",
-                command=lambda: self._show_metadata_evidence(proposal),
+            q_label = (
+                "Ignore this match in future"
+                if len(selected_proposals) == 1
+                else f"Ignore {len(selected_proposals)} selected matches in future"
             )
+            menu.add_command(
+                label=q_label,
+                command=lambda ps=selected_proposals: self._quarantine_proposals(ps),
+            )
+            menu.add_command(
+                label="Quarantine manager…",
+                command=self._show_quarantine_manager,
+            )
+
+            proposal = selected_proposals[0]
+            if tree_name == "tags" and proposal.evidence:
+                menu.add_separator()
+                menu.add_command(
+                    label="Show metadata evidence",
+                    command=lambda: self._show_metadata_evidence(proposal),
+                )
         menu.tk_popup(event.x_root, event.y_root)
         return "break"
 

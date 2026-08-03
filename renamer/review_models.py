@@ -146,6 +146,7 @@ class RenameProposal:
     reason: str
     warnings: tuple[str, ...] = ()
     status: str = "pending"
+    evidence: Evidence = field(default_factory=Evidence)
     review_issues: tuple[ReviewIssue, ...] = field(
         default=(),
         repr=False,
@@ -164,6 +165,7 @@ class RenameProposal:
             CanonicalMetadata.coerce(self.proposed_values),
         )
         object.__setattr__(self, "warnings", tuple(self.warnings))
+        object.__setattr__(self, "evidence", Evidence.coerce(self.evidence))
         if not self.review_issues and self.warnings:
             object.__setattr__(
                 self,
@@ -192,6 +194,7 @@ class RenameProposal:
             "reason": self.reason,
             "warnings": list(self.warnings),
             "status": self.status,
+            "evidence": self.evidence.to_dict(),
         }
 
 
@@ -378,6 +381,7 @@ class ReviewPlan:
                     **value,
                     "snapshot": snapshot_from(value["snapshot"]),
                     "warnings": tuple(value.get("warnings", ())),
+                    "evidence": dict(value.get("evidence", {})),
                 }
             )
 

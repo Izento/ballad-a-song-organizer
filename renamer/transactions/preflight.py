@@ -8,6 +8,7 @@ from pathlib import Path
 import shutil
 
 from ..cover_art import ArtworkRef, verify_artwork
+from ..naming.identity import is_placeholder_artist
 from ..review_models import (
     ApplyResult,
     RenameProposal,
@@ -93,6 +94,12 @@ def _validate_sources(
                 item.path,
                 f"Tag writing is not supported for {extension} files.",
             )
+        elif is_placeholder_artist(str(item.after.get("artist") or "")):
+            block(
+                item.id,
+                item.path,
+                "Placeholder artist metadata cannot be applied.",
+            )
         elif item.artwork_after:
             try:
                 artwork = ArtworkRef(**item.artwork_after.to_dict())
@@ -172,6 +179,14 @@ def _validate_destinations(
     destinations = {}
     for item in renames:
         if item.id in blocked:
+            continue
+        proposed_artist = Path(item.new_path).stem.split(" - ", 1)[0]
+        if is_placeholder_artist(proposed_artist):
+            block(
+                item.id,
+                item.old_path,
+                "Placeholder artist filenames cannot be applied.",
+            )
             continue
         key = path_key(item.new_path)
         if key in destinations:

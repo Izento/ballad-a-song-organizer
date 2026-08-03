@@ -51,6 +51,7 @@ class BackgroundJobs:
         acoustid_key: str | None,
         include_artwork: bool,
         include_duplicates: bool = True,
+        include_renames: bool = True,
     ) -> None:
         def operation():
             plan = analyze_folder(
@@ -61,6 +62,7 @@ class BackgroundJobs:
                 include_duplicates=include_duplicates,
                 enrich_metadata=True,
                 include_artwork=include_artwork,
+                include_renames=include_renames,
                 progress=self._progress,
                 cancel_event=self.cancel_event,
             )

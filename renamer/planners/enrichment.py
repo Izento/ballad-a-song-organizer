@@ -15,6 +15,7 @@ from ..domain.identity import Confidence, weakest_confidence
 from ..domain.issues import ReviewIssue
 from ..extractor import TrackInfo, scan_folder
 from ..formatter import build_filename, split_feat
+from ..genre_aliases import normalize_genre_list
 from ..identification import identify
 from ..media import read_media
 from ..musicbrainz import enrich_recording
@@ -22,8 +23,10 @@ from ..naming.identity import (
     artist_appears_in,
     filename_identity_hint,
     identity_is_recognizable,
+    is_placeholder_artist,
 )
 from ..qualifiers import preserve_local_versions, remove_safe_noise
+from ..quarantine import is_quarantined
 from ..regular_parser import (
     normalize_text,
     parse_regular_filename,
@@ -51,6 +54,9 @@ _SAFE_DERIVATIVE_FIELDS = frozenset(
         "producer",
         "performer",
     }
+)
+_PROTECTED_LOCAL_TITLE_MARKERS = frozenset(
+    {"cypher", "diss", "freestyle", "unreleased"}
 )
 _IDENTIFICATION_WORKERS = 4
 _ENRICHMENT_WORKERS = 4
@@ -291,6 +297,7 @@ def _rename_proposal(
     snapshot: FileSnapshot,
     media,
     after: dict,
+    evidence,
     enriched,
     warnings: tuple[str, ...],
     confidence: str,
@@ -334,6 +341,10 @@ def _rename_proposal(
         confidence=confidence,
         reason="Filename aligned with enriched MusicBrainz metadata.",
         warnings=warnings,
+        evidence={
+            "identification": evidence.to_dict(),
+            "musicbrainz": enriched.to_dict(),
+        },
     )
 
 
@@ -362,7 +373,10 @@ def _identity_warning(path: str, media, values: dict) -> str:
     if not proposed_artist and not proposed_title:
         return ""
     claims = _local_identities(path, media)
-    if not claims or artist_appears_in(Path(path).stem, proposed_artist):
+    label_prefixed = Path(path).stem.count(" - ") >= 2
+    if not claims or (
+        label_prefixed and artist_appears_in(Path(path).stem, proposed_artist)
+    ):
         return ""
     if any(
         identity_is_recognizable(
@@ -380,6 +394,47 @@ def _identity_warning(path: str, media, values: dict) -> str:
         f"but the matched recording is \"{proposed_artist} - {proposed_title}\". "
         "Confirm the match before applying."
     )
+
+
+def _placeholder_identity_warning(values: dict) -> str:
+    proposed_artist = str(values.get("artist") or "")
+    if not is_placeholder_artist(proposed_artist):
+        return ""
+    return (
+        f'Placeholder identity: the provider proposed "{proposed_artist}" as '
+        "the artist. Ballad will not apply placeholder artist metadata."
+    )
+
+
+def _protected_identity_warning(path: str, media, values: dict) -> str:
+    proposed_artist = str(values.get("artist") or "")
+    proposed_title = str(values.get("title") or "")
+    proposed_markers = {
+        marker
+        for marker in _PROTECTED_LOCAL_TITLE_MARKERS
+        if re.search(rf"\b{re.escape(marker)}\b", normalize_text(proposed_title))
+    }
+    for local_artist, local_title in _local_identities(path, media):
+        local_markers = {
+            marker
+            for marker in _PROTECTED_LOCAL_TITLE_MARKERS
+            if re.search(rf"\b{re.escape(marker)}\b", normalize_text(local_title))
+        }
+        if not local_markers:
+            continue
+        primary_artist_survives = (
+            not local_artist
+            or artist_appears_in(proposed_artist, local_artist)
+        )
+        if local_markers <= proposed_markers and primary_artist_survives:
+            continue
+        markers = ", ".join(sorted(local_markers))
+        return (
+            f"Protected local identity: this file is labeled as {markers}, "
+            "but the proposed primary artist/title does not preserve that "
+            "identity. Ballad will not apply this match."
+        )
+    return ""
 
 
 def _identification_failure(path: str, message: str) -> EnrichedFilePlan:
@@ -402,6 +457,16 @@ def _identify_file(
     media_reader,
     identifier,
 ) -> IdentifiedFile | EnrichedFilePlan:
+    if is_quarantined(path):
+        return EnrichedFilePlan(
+            issues=(
+                issue(
+                    canonical_path(path),
+                    "quarantined",
+                    "Skipped identification: match ignored by user quarantine.",
+                ),
+            )
+        )
     media = media_reader(path)
     if not media.usable:
         return EnrichedFilePlan(
@@ -658,6 +723,11 @@ def _plan_identified_file(
         )
     values = _enriched_values(path, media, evidence, enriched)
     after = {**media.tags, **values}
+    if after.get("genre"):
+        # Applied on the merged result, not just fresh MusicBrainz values,
+        # so a file that already has "Rap" locally gets consolidated even
+        # when MusicBrainz doesn't return a genre for this recording at all.
+        after["genre"] = normalize_genre_list(list(after["genre"]))
     artwork_after = (
         artwork_by_release.get(enriched.release_id)
         if not evidence.is_derivative and media.artwork is None
@@ -678,6 +748,15 @@ def _plan_identified_file(
     identity_warning = _identity_warning(path, media, values)
     if identity_warning:
         warnings += (identity_warning,)
+    safety_warnings = tuple(
+        warning
+        for warning in (
+            _placeholder_identity_warning(after),
+            _protected_identity_warning(path, media, after),
+        )
+        if warning
+    )
+    warnings += safety_warnings
     # A clean release lookup doesn't make a shaky recording match any more
     # certain -- cap the displayed confidence at whichever of the two is
     # weaker so a fingerprint-only identification never reads as "high". An
@@ -685,7 +764,7 @@ def _plan_identified_file(
     # providers agreed with each other about the wrong song.
     confidence = (
         Confidence.LOW
-        if identity_warning
+        if identity_warning or safety_warnings
         else weakest_confidence(evidence.confidence, enriched.confidence)
     ).value
     return EnrichedFilePlan(
@@ -705,6 +784,7 @@ def _plan_identified_file(
             snapshot,
             media,
             after,
+            evidence,
             enriched,
             warnings,
             confidence,
@@ -718,6 +798,7 @@ def plan_metadata_enrichment(
     recursive: bool = True,
     acoustid_key: str | None = None,
     include_artwork: bool = True,
+    include_renames: bool = True,
     progress: ProgressCallback | None = None,
     cancel_event=None,
     scanner=scan_folder,
@@ -772,7 +853,7 @@ def plan_metadata_enrichment(
             enrichments.get(candidate.recording_id),
             artwork_by_release,
         )
-        if result.rename is not None:
+        if include_renames and result.rename is not None:
             renames.append(result.rename)
         if result.tag is not None:
             tags.append(result.tag)

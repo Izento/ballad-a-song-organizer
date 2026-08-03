@@ -13,6 +13,8 @@ class IssueCode(StrEnum):
     DESTINATION_EXISTS = "destination_exists"
     VERSION_CONFLICT = "version_conflict"
     IDENTITY_CONFLICT = "identity_conflict"
+    PLACEHOLDER_IDENTITY = "placeholder_identity"
+    PROTECTED_IDENTITY = "protected_identity"
     INVALID_EVIDENCE = "invalid_evidence"
     LOCAL_DERIVATIVE = "local_derivative"
     ONLINE_EVIDENCE = "online_evidence"
@@ -41,6 +43,10 @@ _CATEGORY_CODES = {
 def issue_code_for_message(message: str) -> IssueCode:
     if message.startswith("Identity mismatch:"):
         return IssueCode.IDENTITY_CONFLICT
+    if message.startswith("Placeholder identity:"):
+        return IssueCode.PLACEHOLDER_IDENTITY
+    if message.startswith("Protected local identity:"):
+        return IssueCode.PROTECTED_IDENTITY
     if message.startswith("Destination collides with another proposal."):
         return IssueCode.DESTINATION_COLLISION
     if message.startswith("Destination already exists:"):
@@ -61,6 +67,8 @@ def severity_for_code(code: IssueCode) -> IssueSeverity:
         IssueCode.DESTINATION_COLLISION,
         IssueCode.DESTINATION_EXISTS,
         IssueCode.INVALID_EVIDENCE,
+        IssueCode.PLACEHOLDER_IDENTITY,
+        IssueCode.PROTECTED_IDENTITY,
     }:
         return IssueSeverity.BLOCKING
     if code in {IssueCode.VERSION_CONFLICT, IssueCode.IDENTITY_CONFLICT}:

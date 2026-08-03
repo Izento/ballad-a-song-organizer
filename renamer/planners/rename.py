@@ -10,6 +10,7 @@ from ..formatter import build_filename
 from ..media import read_media
 from ..musicbrainz import enrich_track
 from ..naming.identity import filename_identity_hint
+from ..quarantine import is_quarantined
 from ..regular_parser import normalize_text, normalize_title_text
 from ..review_models import (
     FileSnapshot,
@@ -180,6 +181,15 @@ def plan_renames(
         extract=extract,
     )
     for index, path in enumerate(paths, start=1):
+        if is_quarantined(path):
+            issues.append(
+                issue(
+                    canonical_path(path),
+                    "quarantined",
+                    "Skipped rename: match ignored by user quarantine.",
+                )
+            )
+            continue
         result = extracted.get(index - 1)
         if result is None:
             break

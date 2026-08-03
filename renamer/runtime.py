@@ -30,6 +30,7 @@ def app_paths() -> dict[str, Path]:
         "cache": root / "Cache",
         "backups": root / "Backups",
         "journals": root / "Journals",
+        "quarantine": root / "Quarantine",
         "logs": root / "Logs",
     }
 

@@ -53,7 +53,8 @@ class EnrichmentResult:
     provenance: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "values", CanonicalMetadata.coerce(self.values))
+        object.__setattr__(
+            self, "values", CanonicalMetadata.coerce(self.values))
         object.__setattr__(self, "confidence", Confidence(self.confidence))
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "provenance", tuple(self.provenance))
@@ -476,11 +477,13 @@ def select_release(
 
     def ordering(candidate: ReleaseCandidate) -> tuple[int, int, str, str]:
         official = int(candidate.status.casefold() == "official")
-        standard_type = int(candidate.release_group_type in {"album", "single", "ep"})
+        standard_type = int(candidate.release_group_type in {
+                            "album", "single", "ep"})
         return (
             candidate.score,
             official + standard_type,
-            "".join("9" if character.isdigit() else character for character in candidate.date)
+            "".join("9" if character.isdigit()
+                    else character for character in candidate.date)
             or "9999-99-99",
             candidate.release_id,
         )
@@ -490,10 +493,12 @@ def select_release(
     warnings: list[str] = []
     tied = [candidate for candidate in ranked if candidate.score == best.score]
     if len(tied) > 1 and best.score > 0:
-        warnings.append("Multiple releases match local evidence; selected the earliest.")
+        warnings.append(
+            "Multiple releases match local evidence; selected the earliest.")
         best = min(
             tied,
-            key=lambda candidate: (candidate.date or "9999-99-99", candidate.release_id),
+            key=lambda candidate: (
+                candidate.date or "9999-99-99", candidate.release_id),
         )
     elif best.score <= 0:
         eligible = [
@@ -641,17 +646,22 @@ def _metadata_from_release(
     if label_info:
         first = label_info[0]
         label = first.get("label") or {}
-        values["label"] = label.get("name", "") if isinstance(label, dict) else ""
+        values["label"] = label.get(
+            "name", "") if isinstance(label, dict) else ""
         values["catalog_number"] = first.get("catalog-number", "")
     matched = _release_track(release, recording_id)
     if matched is not None:
         medium, track = matched
         values.update(
             {
-                "tracknumber": track.get("number") or track.get("position", ""),
-                "tracktotal": medium.get("track-count", ""),
-                "discnumber": medium.get("position", ""),
-                "disctotal": release.get("medium-count", ""),
+                # MusicBrainz's JSON API returns these as ints; on-disk tags
+                # are always plain text, so leaving them as ints here would
+                # make every file with a disc/track count look "changed"
+                # against its own already-correct value on every re-run.
+                "tracknumber": str(track.get("number") or track.get("position") or ""),
+                "tracktotal": str(medium.get("track-count") or ""),
+                "discnumber": str(medium.get("position") or ""),
+                "disctotal": str(release.get("medium-count") or ""),
             }
         )
     return {key: value for key, value in values.items() if value not in ("", [], None)}

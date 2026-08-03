@@ -135,6 +135,9 @@ def test_enrich_recording_maps_verified_release_fields(monkeypatch):
     assert result.values["tracknumber"] == "2"
     assert result.values["isrc"] == ["ISRC123"]
     assert "genres" not in recording_includes
+    # Genres are folksonomy tags served alongside "tags" without needing a
+    # separate include -- a legitimate one should still come through.
+    assert result.values["genre"] == ["Electronic"]
 
 
 def test_artist_credit_name_joins_with_provided_joinphrase():

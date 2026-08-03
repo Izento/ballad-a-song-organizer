@@ -18,6 +18,7 @@ from ..regular_parser import RegularName, normalize_text, parse_regular_filename
 
 
 _VERSION_BLOCK_RE = re.compile(r"[\(\[]\s*[^\)\]]+?\s*[\)\]]")
+_VERSION_CREDIT_RE = re.compile(r"\b(?:edit|mix|remix|version)\b", re.IGNORECASE)
 _IDENTITY_TOKEN_RE = re.compile(r"[^\W_]+")
 # Tokens too common to prove two identities are related on their own.
 _GENERIC_IDENTITY_TOKENS = frozenset(
@@ -36,6 +37,9 @@ _GENERIC_IDENTITY_TOKENS = frozenset(
         "vs",
         "x",
     }
+)
+_PLACEHOLDER_ARTISTS = frozenset(
+    {"no artist", "unknown", "unknown artist", "various artists", "va"}
 )
 
 
@@ -161,6 +165,17 @@ def _survives_in(evidence: str, proposal: str) -> bool:
     return bool(squashed) and squashed in _squashed(proposal)
 
 
+def _substantially_survives_in(evidence: str, proposal: str) -> bool:
+    tokens = _distinctive_tokens(evidence)
+    if not tokens:
+        return True
+    overlap = tokens & _identity_tokens(proposal)
+    if len(overlap) * 2 >= len(tokens):
+        return True
+    squashed = _squashed(evidence)
+    return bool(squashed) and squashed in _squashed(proposal)
+
+
 def identity_is_recognizable(
     *,
     local_artist: str,
@@ -185,10 +200,20 @@ def identity_is_recognizable(
     Words - Faces"). With no local artist to check, the title is all the
     evidence there is.
     """
-    proposal = f"{proposed_artist} {proposed_title}"
     if _distinctive_tokens(local_artist):
-        return _survives_in(local_artist, proposal)
-    return _survives_in(local_title, proposal)
+        if _survives_in(local_artist, proposed_artist):
+            return True
+        if _survives_in(local_artist, proposed_title):
+            return _substantially_survives_in(local_title, proposed_title) or bool(
+                _VERSION_CREDIT_RE.search(proposed_title)
+            )
+        return False
+    return _survives_in(local_title, proposed_title)
+
+
+def is_placeholder_artist(value: str) -> bool:
+    """Whether an artist value is a non-identity placeholder."""
+    return normalize_text(value) in _PLACEHOLDER_ARTISTS
 
 
 def artist_appears_in(text: str, artist: str) -> bool:
@@ -251,6 +276,7 @@ __all__ = [
     "artist_appears_in",
     "filename_identity_hint",
     "identity_is_recognizable",
+    "is_placeholder_artist",
     "parse_filename_identity",
     "reconcile_online_version",
 ]

@@ -76,6 +76,7 @@ def plan_metadata_enrichment(
     recursive=True,
     acoustid_key=None,
     include_artwork=True,
+    include_renames=True,
     progress=None,
     cancel_event=None,
 ):
@@ -84,6 +85,7 @@ def plan_metadata_enrichment(
         recursive=recursive,
         acoustid_key=acoustid_key,
         include_artwork=include_artwork,
+        include_renames=include_renames,
         progress=progress,
         cancel_event=cancel_event,
         media_reader=read_media,

@@ -29,7 +29,9 @@ def test_mp3_writer_embeds_rich_tags_and_front_art(tmp_path):
     tags = ID3(path)
     assert tags["TPE1"].text == ["Artist"]
     assert tags["TRCK"].text == ["2"]
-    # ID3v2.3 serializes multi-value genres with a slash separator.
-    assert tags["TCON"].text == ["Electronic/House"]
+    # ID3v2.3 has no native multi-value text support, so multi-value fields
+    # are joined with "; " on write (chosen because it won't collide with
+    # real tag/credit text the way "/" can -- e.g. the genre "hip-hop/rap").
+    assert tags["TCON"].text == ["Electronic; House"]
     assert tags["TXXX:MUSICBRAINZ_RECORDINGID"].text == ["recording-id"]
     assert tags.getall("APIC")[0].data == b"\xff\xd8\xffcover"

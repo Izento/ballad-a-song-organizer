@@ -1,3 +1,7 @@
+param(
+    [switch]$IncludeBrother
+)
+
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
 
@@ -47,23 +51,44 @@ if ($fpcalcFiles.Count -ne 1) {
 }
 
 $env:BALLAD_FPCALC_PATH = $fpcalcFiles[0].FullName
-$releasePath = Join-Path $root "release\public"
-$workPath = Join-Path $root "build\pyinstaller"
+$releaseRoot = Join-Path $root "release"
+$workRoot = Join-Path $root "build\pyinstaller"
+$privateEnvPath = Join-Path $root ".env"
+if ($IncludeBrother -and -not (Test-Path $privateEnvPath -PathType Leaf)) {
+    throw "Cannot build the brother package without the private .env file."
+}
+$buildKinds = @("public")
+if ($IncludeBrother) {
+    $buildKinds += "brother"
+}
 
 Push-Location $root
 try {
-    & uv run --extra build pyinstaller --noconfirm --clean `
-        --distpath $releasePath --workpath $workPath song_organizer.spec
-    if ($LASTEXITCODE -ne 0) {
-        throw "PyInstaller failed with exit code $LASTEXITCODE"
+    foreach ($kind in $buildKinds) {
+        $releasePath = Join-Path $releaseRoot $kind
+        $workPath = Join-Path $workRoot $kind
+        & uv run --extra build pyinstaller --noconfirm --clean `
+            --distpath $releasePath --workpath $workPath song_organizer.spec
+        if ($LASTEXITCODE -ne 0) {
+            throw "PyInstaller failed for $kind with exit code $LASTEXITCODE"
+        }
+
+        $packagePath = Join-Path $releasePath "Ballad"
+        foreach ($file in @(".env.example", "LICENSE", "LGPL-2.1.txt", "THIRD_PARTY_NOTICES.txt")) {
+            Copy-Item (Join-Path $root $file) $packagePath -Force
+        }
+        if ($kind -eq "brother") {
+            Copy-Item $privateEnvPath $packagePath -Force
+        }
+        else {
+            $publicEnvPath = Join-Path $packagePath ".env"
+            if (Test-Path $publicEnvPath) {
+                Remove-Item $publicEnvPath -Force
+            }
+        }
+        Write-Host "Built release\$kind\Ballad with bundled fpcalc"
     }
 }
 finally {
     Pop-Location
 }
-
-$packagePath = Join-Path $releasePath "Ballad"
-foreach ($file in @(".env.example", "LICENSE", "LGPL-2.1.txt", "THIRD_PARTY_NOTICES.txt")) {
-    Copy-Item (Join-Path $root $file) $packagePath -Force
-}
-Write-Host "Built release\public\Ballad with bundled fpcalc"

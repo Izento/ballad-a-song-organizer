@@ -3,7 +3,11 @@
 import pytest
 
 from renamer.domain.issues import ReviewIssue
-from renamer.naming.identity import artist_appears_in, identity_is_recognizable
+from renamer.naming.identity import (
+    artist_appears_in,
+    identity_is_recognizable,
+    is_placeholder_artist,
+)
 
 
 def _recognizable(local: tuple[str, str], proposed: tuple[str, str]) -> bool:
@@ -32,6 +36,10 @@ def _recognizable(local: tuple[str, str], proposed: tuple[str, str]) -> bool:
         (
             ("Alvaro & Joey Dale", "Ready For Action (Original Mix)"),
             ("The Crystal Method", "Ready for Action (Original Mix)"),
+        ),
+        (
+            ("Canibus", "Sway & King Tech (feat. DJ Revolution)"),
+            ("Sway & King Tech", "Canibus Freestyle (feat. DJ Revolution)"),
         ),
     ],
 )
@@ -112,3 +120,25 @@ def test_identity_mismatch_warning_requires_review():
     assert issue.requires_review
     # Still applyable: the user may know better than the check does.
     assert issue.apply_eligible
+
+
+@pytest.mark.parametrize(
+    "artist",
+    ["Unknown Artist", "unknown", "Various Artists", "VA", "No Artist"],
+)
+def test_placeholder_artists_are_not_valid_identities(artist):
+    assert is_placeholder_artist(artist)
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Placeholder identity: provider supplied Unknown Artist.",
+        "Protected local identity: freestyle evidence was discarded.",
+    ],
+)
+def test_hard_identity_guards_are_not_applyable(message):
+    issue = ReviewIssue.from_message(message)
+
+    assert issue.requires_review
+    assert not issue.apply_eligible

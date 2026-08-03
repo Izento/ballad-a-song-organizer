@@ -175,6 +175,7 @@ def _apply_tag(
         action_index = journal.intent(
             "tag",
             proposal_id=item.id,
+            decision_group_id=item.decision_group_id,
             path=item.path,
             backup_path=str(backup),
             temporary_path=str(temporary),
@@ -291,6 +292,7 @@ def _apply_renames(
             action_index = journal.intent(
                 "rename-stage",
                 proposal_id=item.id,
+                decision_group_id=item.decision_group_id,
                 old=current,
                 new=temporary,
             )
@@ -318,6 +320,7 @@ def _apply_renames(
         action_index = journal.intent(
             "rename",
             proposal_id=item.id,
+            decision_group_id=item.decision_group_id,
             old=item.old_path,
             new=item.new_path,
         )
@@ -555,10 +558,18 @@ def read_batch(batch_id: str) -> dict:
         return json.load(handle)
 
 
-def undo_batch(batch_id: str) -> list[ApplyResult]:
+def undo_batch(
+    batch_id: str,
+    decision_group_ids: set[str] | list[str] | None = None,
+) -> list[ApplyResult]:
     """Restore completed actions without overwriting unrelated files."""
     data = read_batch(batch_id)
     results: list[ApplyResult] = []
+    target_groups = (
+        {str(g).casefold() for g in decision_group_ids}
+        if decision_group_ids is not None
+        else None
+    )
 
     def mark_undone(action: dict) -> None:
         action.update(
@@ -578,6 +589,12 @@ def undo_batch(batch_id: str) -> list[ApplyResult]:
         action["undo_error_at"] = datetime.now(timezone.utc).isoformat()
 
     for action in reversed(data.get("actions", [])):
+        action_group = str(
+            action.get("decision_group_id")
+            or path_key(action.get("path") or action.get("old") or action.get("new") or "")
+        ).casefold()
+        if target_groups is not None and action_group not in target_groups:
+            continue
         if (
             action.get("status") == "intent"
             and action.get("kind") == "tag"
@@ -708,9 +725,16 @@ def undo_batch(batch_id: str) -> list[ApplyResult]:
             results.append(
                 _result_error(action.get("proposal_id", ""), action.get("path", ""), exc)
             )
-    data["status"] = "undone" if not any(
-        result.status == "failed" for result in results
-    ) else "recovery-required"
+    remaining_completed = any(
+        action.get("status") == "completed"
+        for action in data.get("actions", [])
+    )
+    if any(result.status == "failed" for result in results):
+        data["status"] = "recovery-required"
+    elif not remaining_completed:
+        data["status"] = "undone"
+    else:
+        data["status"] = "completed"
     atomic_write_json(_journal_path(batch_id), data)
     return results
 

@@ -8,16 +8,53 @@ from ...domain.metadata import ArtworkDescriptor
 from ..schema import FIELDS, MULTI_VALUE_FIELDS, pair_text, split_pair, value_list
 
 
-def _frame_values(frame: Any, *, split_slash: bool = False) -> list[str]:
-    return value_list(getattr(frame, "text", frame), split_slash=split_slash)
+# ID3v2.3 text frames have no native way to store more than one value, so
+# multi-value fields (genre, writer, tag, ...) are joined into a single
+# string on write and split back apart on read. "; " is deliberately
+# unusual for real tag/credit text -- unlike "/", which collides with
+# legitimate compound values such as the MusicBrainz genre "hip-hop/rap".
+_JOIN_SEP = "; "
+
+
+def _split_joined(text: str) -> list[str]:
+    if _JOIN_SEP in text:
+        return text.split(_JOIN_SEP)
+    if "/" in text:
+        # Backward compatibility only: files tagged before this fix used
+        # "/" as the join separator, which is ambiguous for values that
+        # already contain a literal slash. New writes never produce this.
+        return text.split("/")
+    return [text]
+
+
+def _frame_values(frame: Any, *, split_multi: bool = False) -> list[str]:
+    items = value_list(getattr(frame, "text", frame))
+    if not split_multi:
+        return items
+    return [
+        part.strip()
+        for item in items
+        for part in _split_joined(item)
+        if part.strip()
+    ]
+
+
+_MULTI_VALUE_FIELDS_CASEFOLD = frozenset(
+    name.casefold() for name in MULTI_VALUE_FIELDS
+)
 
 
 def _custom_values(tags: Any) -> dict[str, list[str]]:
+    # Multi-value fields without a dedicated ID3 frame (writer, producer,
+    # mixer, tag) are stored in a custom TXXX frame.
     result: dict[str, list[str]] = {}
     for frame in tags.getall("TXXX"):
         description = str(getattr(frame, "desc", "")).casefold()
         if description:
-            result[description] = _frame_values(frame)
+            result[description] = _frame_values(
+                frame,
+                split_multi=description in _MULTI_VALUE_FIELDS_CASEFOLD,
+            )
     return result
 
 
@@ -35,7 +72,7 @@ def read_tags(audio: Any) -> dict[str, Any]:
                 values.extend(
                     _frame_values(
                         frame,
-                        split_slash=field.canonical in MULTI_VALUE_FIELDS,
+                        split_multi=field.canonical in MULTI_VALUE_FIELDS,
                     )
                 )
         else:
@@ -150,21 +187,28 @@ def write(
         if field.canonical not in values:
             continue
         entries = value_list(values[field.canonical])
+        # Pre-join multi-value fields ourselves into a single string rather
+        # than handing mutagen a multi-item text list: mutagen's own v2.3
+        # join (v23_sep, default "/") would reintroduce the same "/"
+        # collision this separator was chosen to avoid.
+        text = _JOIN_SEP.join(entries) if field.canonical in MULTI_VALUE_FIELDS else (
+            entries[0] if entries else ""
+        )
         if field.id3:
             frame_type = frame_types[field.id3]
-            if entries:
+            if text:
                 tags.setall(
                     field.id3,
-                    [frame_type(encoding=3, text=entries)],
+                    [frame_type(encoding=3, text=[text])],
                 )
             else:
                 tags.delall(field.id3)
             continue
         description = field.canonical.upper()
-        if entries:
+        if text:
             tags.setall(
                 f"TXXX:{description}",
-                [TXXX(encoding=3, desc=description, text=entries)],
+                [TXXX(encoding=3, desc=description, text=[text])],
             )
         else:
             tags.delall(f"TXXX:{description}")
@@ -201,7 +245,15 @@ def write(
                     data=data,
                 )
             )
-    tags.save(path, v2_version=3)
+    # v1=0: strip/never regenerate the legacy ID3v1 trailer. Mutagen's
+    # default (v1=1) silently rewrites an existing v1 tag from whatever the
+    # current ID3v2 frames say every time we save -- and when a field like
+    # genre isn't set at the v2 level, it writes an "unmapped" v1 genre
+    # byte (255) that some players (observed: Winamp) misrender as an
+    # unrelated genre name instead of "no genre". ID3v2 is authoritative
+    # for every field mutagen/Ballad reads, so the v1 trailer is pure
+    # legacy cruft that only exists to cause exactly this kind of bug.
+    tags.save(path, v2_version=3, v1=0)
 
 
 __all__ = ["read_artwork", "read_artwork_data", "read_tags", "write"]

@@ -608,6 +608,199 @@ def test_wrong_embedded_recording_id_is_flagged_instead_of_trusted(tmp_path, mon
     assert tags[0].requires_review
 
 
+def test_placeholder_artist_is_hard_blocked(tmp_path, monkeypatch):
+    source = tmp_path / "Chino XL - Bat Signals Up.mp3"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(
+        review_api,
+        "read_media",
+        lambda path: MediaRead(
+            path=path,
+            status="ok",
+            container="MP3",
+            tags={"artist": "Chino XL", "title": "Bat Signals Up"},
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "identify",
+        lambda *_args, **_kwargs: RecordingEvidence(
+            exact_recording_id="recording",
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "enrich_recording",
+        lambda *_args, **_kwargs: EnrichmentResult(
+            recording_id="recording",
+            values={
+                "artist": "Unknown Artist",
+                "title": "Bat Signals Up (feat. Chino XL)",
+            },
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(review_api, "download_front_art", lambda _release: None)
+
+    renames, tags, _issues = review_api.plan_metadata_enrichment(
+        str(tmp_path),
+        recursive=False,
+    )
+
+    assert any("Placeholder identity" in warning for warning in renames[0].warnings)
+    assert not renames[0].apply_eligible
+    assert not tags[0].apply_eligible
+
+
+def test_placeholder_local_tag_is_blocked_even_without_provider_override(
+    tmp_path, monkeypatch
+):
+    # MusicBrainz can resolve a title without ever asserting an artist name
+    # (e.g. a recording with no usable artist credit). When that happens
+    # the enriched "after" dict falls back to the file's own tag, which is
+    # frequently "Unknown Artist" on ripped/downloaded files even though
+    # the filename itself is correct. The safeguard has to catch this
+    # merged value, not just an artist MusicBrainz explicitly proposed.
+    source = tmp_path / "The Game - Here We Go Again (feat. Dr. Dre).mp3"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(
+        review_api,
+        "read_media",
+        lambda path: MediaRead(
+            path=path,
+            status="ok",
+            container="MP3",
+            tags={"artist": "Unknown Artist", "title": "Track 01"},
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "identify",
+        lambda *_args, **_kwargs: RecordingEvidence(
+            exact_recording_id="recording",
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "enrich_recording",
+        lambda *_args, **_kwargs: EnrichmentResult(
+            recording_id="recording",
+            # No "artist" key at all -- MusicBrainz filtered it out because
+            # it could not resolve a usable artist credit.
+            values={"title": "Here We Go Again (feat. Dr. Dre)"},
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(review_api, "download_front_art", lambda _release: None)
+
+    renames, tags, _issues = review_api.plan_metadata_enrichment(
+        str(tmp_path),
+        recursive=False,
+    )
+
+    assert renames[0].proposed_values["artist"] == "Unknown Artist"
+    assert any("Placeholder identity" in warning for warning in renames[0].warnings)
+    assert renames[0].confidence == "low"
+    assert not renames[0].apply_eligible
+    assert tags[0].after["artist"] == "Unknown Artist"
+    assert not tags[0].apply_eligible
+
+
+def test_genre_aliases_are_applied_to_the_merged_after_value(tmp_path, monkeypatch):
+    # The alias has to run on the merged "after" dict, not just whatever
+    # MusicBrainz returns -- otherwise a file whose *existing* local tag is
+    # "Rap" (with MusicBrainz silent on genre for this recording) would
+    # never get consolidated into "Hip-Hop".
+    source = tmp_path / "Artist - Song.mp3"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(
+        review_api,
+        "read_media",
+        lambda path: MediaRead(
+            path=path,
+            status="ok",
+            container="MP3",
+            tags={"artist": "Artist", "title": "Song", "genre": ["Rap"]},
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "identify",
+        lambda *_args, **_kwargs: RecordingEvidence(
+            exact_recording_id="recording",
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "enrich_recording",
+        lambda *_args, **_kwargs: EnrichmentResult(
+            recording_id="recording",
+            values={
+                "artist": "Artist",
+                "title": "Song",
+                "musicbrainz_recordingid": "recording",
+            },
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(review_api, "download_front_art", lambda _release: None)
+
+    _renames, tags, _issues = review_api.plan_metadata_enrichment(
+        str(tmp_path),
+        recursive=False,
+    )
+
+    assert tags[0].after["genre"] == ["Hip-Hop"]
+
+
+def test_freestyle_identity_cannot_be_silently_replaced(tmp_path, monkeypatch):
+    source = tmp_path / "Canibus - Live Freestyle Diss.mp3"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(
+        review_api,
+        "read_media",
+        lambda path: MediaRead(
+            path=path,
+            status="ok",
+            container="MP3",
+            tags={"artist": "Canibus", "title": "Live Freestyle Diss"},
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "identify",
+        lambda *_args, **_kwargs: RecordingEvidence(
+            exact_recording_id="recording",
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "enrich_recording",
+        lambda *_args, **_kwargs: EnrichmentResult(
+            recording_id="recording",
+            values={"artist": "Canibus", "title": "No Return"},
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(review_api, "download_front_art", lambda _release: None)
+
+    renames, tags, _issues = review_api.plan_metadata_enrichment(
+        str(tmp_path),
+        recursive=False,
+    )
+
+    assert any(
+        "Protected local identity" in warning
+        for warning in renames[0].warnings
+    )
+    assert not renames[0].apply_eligible
+    assert not tags[0].apply_eligible
+
+
 def test_enrichment_does_not_flag_a_remix_credited_to_its_original_artist(
     tmp_path,
     monkeypatch,

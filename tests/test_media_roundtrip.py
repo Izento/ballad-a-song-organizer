@@ -68,6 +68,20 @@ def test_supported_container_round_trips_canonical_metadata(tmp_path, extension)
     }
 
 
+def test_mp3_genre_containing_slash_round_trips_as_one_value(tmp_path):
+    # MusicBrainz has real compound genre tags like "hip-hop/rap" -- if the
+    # multi-value join separator were "/" (ID3v2.3's own default), this
+    # single value would be indistinguishable on disk from two separate
+    # genres joined together, and would keep reappearing as a "change" on
+    # every re-run even though nothing about it changed.
+    target = _copy_fixture(tmp_path, "mp3")
+
+    write_tags_to_file(str(target), {"genre": ["hip-hop/rap", "pop"]})
+    media = read_media(str(target))
+
+    assert set(media.tags["genre"]) == {"hip-hop/rap", "pop"}
+
+
 @pytest.mark.parametrize(
     ("extension", "cover_name"),
     (
