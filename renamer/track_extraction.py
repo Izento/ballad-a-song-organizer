@@ -1,3 +1,5 @@
+"""Extract normalized track metadata from files, tags, and online matches."""
+
 import os
 import re
 from dataclasses import replace
@@ -60,10 +62,6 @@ def scan_folder(folder_path: str, recursive: bool = True) -> list[str]:
     return sorted(paths)
 
 
-# ---------------------------------------------------------------------------
-# Tag reading
-# ---------------------------------------------------------------------------
-
 def _read_tags(path: str) -> dict:
     """Read tags through the shared format-aware media reader."""
     media = read_media(path)
@@ -82,10 +80,6 @@ def _read_tags(path: str) -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# OC ReMix detection
-# ---------------------------------------------------------------------------
-
 _OCREMIX_PAREN_RE = re.compile(r'\(\s*OC\s*Re[Mm]ix\s*\)', re.IGNORECASE)
 
 
@@ -103,10 +97,6 @@ def _detect_ocremix(tags: dict, filename: str) -> bool:
         return True
     return False
 
-
-# ---------------------------------------------------------------------------
-# Extraction strategies
-# ---------------------------------------------------------------------------
 
 def _split_ocremix_artists(raw: str) -> list[str]:
     """
@@ -254,10 +244,6 @@ def _from_musicbrainz_lookup(path: str, ext: str) -> TrackInfo:
                      artist=artist_hint)
 
 
-# ---------------------------------------------------------------------------
-# Junk tag detection
-# ---------------------------------------------------------------------------
-
 def _is_junk_tag(value: str) -> bool:
     """
     Returns True when a tag value is a known placeholder that shouldn't be trusted.
@@ -273,10 +259,6 @@ def _is_junk_tag(value: str) -> bool:
         return True
     return False
 
-
-# ---------------------------------------------------------------------------
-# AcoustID fingerprint strategy
-# ---------------------------------------------------------------------------
 
 def _from_acoustid(path: str, ext: str, api_key: str) -> 'TrackInfo | None':
     """Fingerprint the audio and return a TrackInfo if a confident match is found."""
@@ -310,18 +292,10 @@ def _preserve_filename_version_qualifiers(path: str, track: TrackInfo) -> TrackI
     )
 
 
-# ---------------------------------------------------------------------------
-# Smart capitalization
-# ---------------------------------------------------------------------------
-
 def _smart_capitalize(s: str) -> str:
     """Capitalize only when the string is entirely lowercase."""
     return s.title() if s == s.lower() else s
 
-
-# ---------------------------------------------------------------------------
-# Main entry point
-# ---------------------------------------------------------------------------
 
 def _forced_strategy_track(
     path: str,

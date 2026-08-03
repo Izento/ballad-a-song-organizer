@@ -1,3 +1,5 @@
+"""Launch the desktop interface as a module or frozen executable."""
+
 from __future__ import annotations
 
 import sys

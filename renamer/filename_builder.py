@@ -1,3 +1,5 @@
+"""Build safe, canonical filenames from extracted track metadata."""
+
 import re
 
 from .filename_parser import normalize_title_text
