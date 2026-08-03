@@ -4,10 +4,21 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from importlib import import_module
 
 from cli.output import ConsoleOutput, Output
 from cli.parser import parse_args
 from renamer.runtime import ensure_app_dirs, resource_path
+
+_COMMAND_MODULES = {
+    "rename": "cli.commands.rename",
+    "audit": "cli.commands.audit",
+    "tags": "cli.commands.tags",
+    "enrich": "cli.commands.enrich",
+    "dedup": "cli.commands.dedup",
+    "auto-detect": "cli.commands.auto_detect",
+    "undo": "cli.commands.undo",
+}
 
 
 def _configure_utf8_console() -> None:
@@ -34,23 +45,10 @@ def _run_gui() -> int:
 def _dispatch(command: str, args, output: Output) -> int:
     if command == "gui":
         return _run_gui()
-    if command == "rename":
-        from cli.commands.rename import run
-    elif command == "audit":
-        from cli.commands.audit import run
-    elif command == "tags":
-        from cli.commands.tags import run
-    elif command == "enrich":
-        from cli.commands.enrich import run
-    elif command == "dedup":
-        from cli.commands.dedup import run
-    elif command == "auto-detect":
-        from cli.commands.auto_detect import run
-    elif command == "undo":
-        from cli.commands.undo import run
-    else:
+    module_name = _COMMAND_MODULES.get(command)
+    if module_name is None:
         raise ValueError(f"Unknown command: {command}")
-    return run(args, output)
+    return import_module(module_name).run(args, output)
 
 
 def main(

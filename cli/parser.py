@@ -32,15 +32,7 @@ def _add_online_options(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="ballad",
-        description="Review-first music library organizer.",
-    )
-    commands = parser.add_subparsers(dest="command", title="commands")
-
-    commands.add_parser("gui", help="Open the desktop application.")
-
+def _add_rename_command(commands) -> None:
     rename = commands.add_parser("rename", help="Review or apply filename repairs.")
     _add_folder_options(rename)
     _add_online_options(rename)
@@ -60,10 +52,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Confirm each proposed rename.",
     )
 
+
+def _add_audit_command(commands) -> None:
     audit = commands.add_parser("audit", help="Build a read-only review report.")
     _add_folder_options(audit)
     _add_online_options(audit)
 
+
+def _add_tags_command(commands) -> None:
     tags = commands.add_parser("tags", help="Review or apply filename-derived tags.")
     _add_folder_options(tags)
     tags.add_argument(
@@ -72,6 +68,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Apply reviewed-safe tag repairs instead of previewing them.",
     )
 
+
+def _add_enrich_command(commands) -> None:
     enrich = commands.add_parser(
         "enrich",
         help="Identify songs and enrich verified metadata and artwork.",
@@ -95,9 +93,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     enrich.set_defaults(cover_art=True)
 
+
+def _add_utility_commands(commands) -> None:
     dedup = commands.add_parser("dedup", help="Audit duplicate candidates.")
     _add_folder_options(dedup)
-
     auto_detect = commands.add_parser(
         "auto-detect",
         help="Recommend an extraction strategy for a folder.",
@@ -105,6 +104,20 @@ def build_parser() -> argparse.ArgumentParser:
     auto_detect.add_argument("--folder", required=True, metavar="PATH")
 
     commands.add_parser("undo", help="Undo the latest recoverable batch.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="ballad",
+        description="Review-first music library organizer.",
+    )
+    commands = parser.add_subparsers(dest="command", title="commands")
+    commands.add_parser("gui", help="Open the desktop application.")
+    _add_rename_command(commands)
+    _add_audit_command(commands)
+    _add_tags_command(commands)
+    _add_enrich_command(commands)
+    _add_utility_commands(commands)
     return parser
 
 

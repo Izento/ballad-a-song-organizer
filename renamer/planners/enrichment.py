@@ -105,17 +105,25 @@ class IdentifiedFile:
     def recording_id(self) -> str:
         return self.evidence.resolved_recording_id
 
-def _merge_features(*groups: tuple[str, ...]) -> tuple[str, ...]:
+def _merge_features(
+    *groups: tuple[str, ...],
+    include_partial_matches: bool = False,
+) -> tuple[str, ...]:
     merged: list[str] = []
     for group in groups:
         for feature in group:
             normalized = normalize_text(feature)
-            if not normalized:
+            if not feature or (include_partial_matches and not normalized):
                 continue
             if any(
                 _features_match(feature, existing)
-                or normalized in normalize_text(existing)
-                or normalize_text(existing) in normalized
+                or (
+                    include_partial_matches
+                    and (
+                        normalized in normalize_text(existing)
+                        or normalize_text(existing) in normalized
+                    )
+                )
                 for existing in merged
             ):
                 continue
@@ -125,7 +133,11 @@ def _merge_features(*groups: tuple[str, ...]) -> tuple[str, ...]:
 
 def _title_with_features(title: str, features: tuple[str, ...]) -> str:
     clean_title, existing_features = split_features(title)
-    merged = _merge_features(existing_features, features)
+    merged = _merge_features(
+        existing_features,
+        features,
+        include_partial_matches=True,
+    )
     if not merged:
         return clean_title
     return f"{clean_title} (feat. {', '.join(merged)})"
@@ -146,6 +158,7 @@ def _local_feature_names(
         tuple(filename_features),
         tuple(artist_features),
         tuple(title_features),
+        include_partial_matches=True,
     )
 
 
@@ -279,18 +292,6 @@ def _tag_proposal(
     )
 
 
-def _merged_features(*groups: tuple[str, ...]) -> tuple[str, ...]:
-    """Combine feature lists, dropping case-insensitive duplicates."""
-    merged: list[str] = []
-    for group in groups:
-        for feature in group:
-            if feature and not any(
-                _features_match(feature, existing) for existing in merged
-            ):
-                merged.append(feature)
-    return tuple(merged)
-
-
 def _rename_proposal(
     path: str,
     snapshot: FileSnapshot,
@@ -317,7 +318,7 @@ def _rename_proposal(
     # list, which would double up on the same name.
     artist, artist_features = split_feat(artist)
     title, title_features = split_feat(title)
-    feat_artists = _merged_features(artist_features, title_features)
+    feat_artists = _merge_features(artist_features, title_features)
     track = TrackInfo(
         path=path,
         ext=Path(path).suffix,
@@ -575,6 +576,16 @@ def _recording_groups(
     return groups
 
 
+def _enrichment_future_result(future, pending):
+    """Return one enrichment result, cancelling siblings on failure."""
+    try:
+        return future.result()
+    except Exception:  # pylint: disable=broad-exception-caught
+        for pending_future in pending:
+            pending_future.cancel()
+        raise
+
+
 def _enrich_recordings(
     candidates: list[IdentifiedFile],
     *,
@@ -612,12 +623,7 @@ def _enrich_recordings(
             done, _ = wait(futures, return_when=FIRST_COMPLETED)
             for future in done:
                 recording_id, path, _local_tags = futures.pop(future)
-                try:
-                    result_id, result = future.result()
-                except Exception:  # pylint: disable=broad-exception-caught
-                    for pending in futures:
-                        pending.cancel()
-                    raise
+                result_id, result = _enrichment_future_result(future, futures)
                 results[result_id] = result
                 completed += 1
                 emit(
@@ -702,42 +708,38 @@ def _download_artwork(
     return results
 
 
-def _plan_identified_file(
-    candidate: IdentifiedFile,
-    enriched,
-    artwork_by_release: dict[str, dict | None],
-) -> EnrichedFilePlan:
-    path = candidate.path
-    media = candidate.media
-    evidence = candidate.evidence
-    if enriched is None:
-        return EnrichedFilePlan(
-            issues=(
-                issue(
-                    canonical_path(path),
-                    "metadata-enrichment",
-                    "MusicBrainz did not provide metadata for this recording.",
-                ),
-            )
+def _missing_enrichment_plan(path: str) -> EnrichedFilePlan:
+    return EnrichedFilePlan(
+        issues=(
+            issue(
+                canonical_path(path),
+                "metadata-enrichment",
+                "MusicBrainz did not provide metadata for this recording.",
+            ),
         )
-    values = _enriched_values(path, media, evidence, enriched)
+    )
+
+
+def _merged_after(media, values: dict) -> dict:
+    """Merge enriched values, then normalize the resulting genre field."""
     after = {**media.tags, **values}
     if after.get("genre"):
         # Applied on the merged result, not just fresh MusicBrainz values,
-        # so a file that already has "Rap" locally gets consolidated even
-        # when MusicBrainz doesn't return a genre for this recording at all.
+        # so a local "Rap" is consolidated when MusicBrainz has no genre.
         after["genre"] = normalize_genre_list(list(after["genre"]))
-    artwork_after = (
-        artwork_by_release.get(enriched.release_id)
-        if not evidence.is_derivative and media.artwork is None
-        else None
-    )
-    snapshot = FileSnapshot.capture(
-        path,
-        tags=media.tags,
-        artwork=media.artwork,
-        include_hash=True,
-    )
+    return after
+
+
+def _planned_artwork(media, evidence, enriched, artwork_by_release):
+    if evidence.is_derivative or media.artwork is not None:
+        return None
+    return artwork_by_release.get(enriched.release_id)
+
+
+def _planning_warnings(candidate, enriched, values, after):
+    path = candidate.path
+    media = candidate.media
+    evidence = candidate.evidence
     warnings = tuple((*evidence.warnings, *enriched.warnings))
     if evidence.is_derivative:
         warnings += (
@@ -755,17 +757,49 @@ def _plan_identified_file(
         )
         if warning
     )
-    warnings += safety_warnings
-    # A clean release lookup doesn't make a shaky recording match any more
-    # certain -- cap the displayed confidence at whichever of the two is
-    # weaker so a fingerprint-only identification never reads as "high". An
-    # identity that no longer resembles the file outranks both signals: the
-    # providers agreed with each other about the wrong song.
-    confidence = (
-        Confidence.LOW
-        if identity_warning or safety_warnings
-        else weakest_confidence(evidence.confidence, enriched.confidence)
-    ).value
+    return warnings + safety_warnings, identity_warning, safety_warnings
+
+
+def _planned_confidence(evidence, enriched, identity_warning, safety_warnings) -> str:
+    if identity_warning or safety_warnings:
+        return Confidence.LOW.value
+    return weakest_confidence(evidence.confidence, enriched.confidence).value
+
+
+def _plan_identified_file(
+    candidate: IdentifiedFile,
+    enriched,
+    artwork_by_release: dict[str, dict | None],
+) -> EnrichedFilePlan:
+    path, media, evidence = candidate.path, candidate.media, candidate.evidence
+    if enriched is None:
+        return _missing_enrichment_plan(path)
+    values = _enriched_values(path, media, evidence, enriched)
+    after = _merged_after(media, values)
+    artwork_after = _planned_artwork(
+        media,
+        evidence,
+        enriched,
+        artwork_by_release,
+    )
+    snapshot = FileSnapshot.capture(
+        path,
+        tags=media.tags,
+        artwork=media.artwork,
+        include_hash=True,
+    )
+    warnings, identity_warning, safety_warnings = _planning_warnings(
+        candidate,
+        enriched,
+        values,
+        after,
+    )
+    confidence = _planned_confidence(
+        evidence,
+        enriched,
+        identity_warning,
+        safety_warnings,
+    )
     return EnrichedFilePlan(
         tag=_tag_proposal(
             path,
@@ -791,6 +825,42 @@ def _plan_identified_file(
     )
 
 
+def _identified_candidates(identified):
+    candidates: list[IdentifiedFile] = []
+    issues: list[ReviewIssue] = []
+    for index in sorted(identified):
+        result = identified[index]
+        if isinstance(result, IdentifiedFile):
+            candidates.append(result)
+        else:
+            issues.extend(result.issues)
+    return candidates, issues
+
+
+def _plans_for_candidates(
+    candidates: list[IdentifiedFile],
+    enrichments: dict[str, object | None],
+    artwork_by_release: dict[str, dict | None],
+    *,
+    include_renames: bool,
+):
+    renames = []
+    tags = []
+    issues = []
+    for candidate in candidates:
+        result = _plan_identified_file(
+            candidate,
+            enrichments.get(candidate.recording_id),
+            artwork_by_release,
+        )
+        if include_renames and result.rename is not None:
+            renames.append(result.rename)
+        if result.tag is not None:
+            tags.append(result.tag)
+        issues.extend(result.issues)
+    return renames, tags, issues
+
+
 def plan_metadata_enrichment(
     folder_path: str,
     *,
@@ -807,9 +877,6 @@ def plan_metadata_enrichment(
     artwork_download=download_front_art,
 ):
     paths = scanner(folder_path, recursive=recursive)
-    renames = []
-    tags = []
-    issues = []
     identified = _run_identification(
         paths,
         acoustid_key=acoustid_key,
@@ -818,16 +885,9 @@ def plan_metadata_enrichment(
         media_reader=media_reader,
         identifier=identifier,
     )
-    candidates: list[IdentifiedFile] = []
-    for index in sorted(identified):
-        result = identified[index]
-        if isinstance(result, IdentifiedFile):
-            candidates.append(result)
-        else:
-            issues.extend(result.issues)
+    candidates, issues = _identified_candidates(identified)
     if cancel_event is not None and cancel_event.is_set():
-        return refresh_rename_readiness(renames), tags, issues
-
+        return refresh_rename_readiness([]), [], issues
     enrichments = _enrich_recordings(
         candidates,
         progress=progress,
@@ -835,8 +895,7 @@ def plan_metadata_enrichment(
         recording_enricher=recording_enricher,
     )
     if cancel_event is not None and cancel_event.is_set():
-        return refresh_rename_readiness(renames), tags, issues
-
+        return refresh_rename_readiness([]), [], issues
     artwork_by_release = _download_artwork(
         _artwork_requests(candidates, enrichments, include_artwork),
         progress=progress,
@@ -844,19 +903,14 @@ def plan_metadata_enrichment(
         artwork_download=artwork_download,
     )
     if cancel_event is not None and cancel_event.is_set():
-        return refresh_rename_readiness(renames), tags, issues
-
-    for candidate in candidates:
-        result = _plan_identified_file(
-            candidate,
-            enrichments.get(candidate.recording_id),
-            artwork_by_release,
-        )
-        if include_renames and result.rename is not None:
-            renames.append(result.rename)
-        if result.tag is not None:
-            tags.append(result.tag)
-        issues.extend(result.issues)
+        return refresh_rename_readiness([]), [], issues
+    renames, tags, planning_issues = _plans_for_candidates(
+        candidates,
+        enrichments,
+        artwork_by_release,
+        include_renames=include_renames,
+    )
+    issues.extend(planning_issues)
     return refresh_rename_readiness(renames), tags, issues
 
 

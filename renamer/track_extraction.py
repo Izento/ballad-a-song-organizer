@@ -323,6 +323,67 @@ def _smart_capitalize(s: str) -> str:
 # Main entry point
 # ---------------------------------------------------------------------------
 
+def _forced_strategy_track(
+    path: str,
+    ext: str,
+    strategy: str | None,
+) -> TrackInfo | None:
+    if strategy == 'musicbrainz':
+        return _from_musicbrainz_lookup(path, ext)
+    if strategy == 'regular':
+        return _from_filename(path, ext, is_ocremix=False)
+    if strategy == 'filename_norm':
+        tags = _read_tags(path)
+        return _from_filename(
+            path,
+            ext,
+            is_ocremix=_detect_ocremix(tags, os.path.basename(path)),
+        )
+    return None
+
+
+def _acoustid_match(
+    path: str,
+    ext: str,
+    strategy: str | None,
+    acoustid_key: str | None,
+    prefer_acoustid: bool,
+) -> TrackInfo | None:
+    if not acoustid_key or (
+        not prefer_acoustid
+        and strategy in {'regular', 'filename_norm', 'musicbrainz'}
+    ):
+        return None
+    return _from_acoustid(path, ext, acoustid_key)
+
+
+def _auto_detect_track(path: str, ext: str, tags: dict) -> TrackInfo:
+    filename = os.path.basename(path)
+    is_ocremix = _detect_ocremix(tags, filename)
+    has_writer_ocremix_tags = bool(
+        tags.get('TIT2')
+        and tags.get('TPE2', '').casefold() == 'overclocked remix'
+    )
+    has_new_ocremix_tags = bool(
+        tags.get('TIT1') and tags.get('TIT3') and not has_writer_ocremix_tags
+    )
+    artist_tag = tags.get('TPE1', '')
+    title_tag = tags.get('TIT2', '')
+    has_basic_tags = bool(artist_tag or title_tag)
+    tags_are_good = has_basic_tags and not (
+        _is_junk_tag(artist_tag) or _is_junk_tag(title_tag)
+    )
+    if is_ocremix and has_writer_ocremix_tags:
+        return _from_ocremix_writer_tags(path, ext, tags)
+    if is_ocremix and has_new_ocremix_tags:
+        return _from_ocremix_new_tags(path, ext, tags)
+    if is_ocremix and has_basic_tags:
+        return _from_ocremix_old_tags(path, ext, tags)
+    if tags_are_good:
+        return _from_tags(path, ext, tags)
+    return _from_filename(path, ext, is_ocremix)
+
+
 def extract_track(
     path: str,
     strategy: str = None,
@@ -348,57 +409,17 @@ def extract_track(
     if ext not in AUDIO_EXTENSIONS:
         return TrackInfo(path=path, ext=ext,
                          skip_reason=f'Unsupported format ({ext})')
-
-    if strategy == 'musicbrainz':
-        return _from_musicbrainz_lookup(path, ext)
-
-    if strategy == 'regular':
-        return _from_filename(path, ext, is_ocremix=False)
-
-    if strategy == 'filename_norm':
-        tags = _read_tags(path)
-        return _from_filename(
-            path,
-            ext,
-            is_ocremix=_detect_ocremix(tags, os.path.basename(path)),
-        )
-
-    if acoustid_key and (prefer_acoustid or strategy not in {
-        'regular',
-        'filename_norm',
-        'musicbrainz',
-    }):
-        result = _from_acoustid(path, ext, acoustid_key)
-        if result:
-            return result
-
+    forced_track = _forced_strategy_track(path, ext, strategy)
+    if forced_track is not None:
+        return forced_track
+    result = _acoustid_match(
+        path,
+        ext,
+        strategy,
+        acoustid_key,
+        prefer_acoustid,
+    )
+    if result is not None:
+        return result
     tags = _read_tags(path)
-    filename = os.path.basename(path)
-    is_ocremix = _detect_ocremix(tags, filename)
-
-    # Auto-detect from tags
-    has_writer_ocremix_tags = bool(
-        tags.get('TIT2')
-        and tags.get('TPE2', '').casefold() == 'overclocked remix'
-    )
-    has_new_ocremix_tags = bool(
-        tags.get('TIT1') and tags.get('TIT3') and not has_writer_ocremix_tags
-    )
-    artist_tag = tags.get('TPE1', '')
-    title_tag  = tags.get('TIT2', '')
-    has_basic_tags = bool(artist_tag or title_tag)
-    tags_are_good  = has_basic_tags and not (_is_junk_tag(artist_tag) or _is_junk_tag(title_tag))
-
-    if is_ocremix and has_writer_ocremix_tags:
-        return _from_ocremix_writer_tags(path, ext, tags)
-
-    if is_ocremix and has_new_ocremix_tags:
-        return _from_ocremix_new_tags(path, ext, tags)
-
-    if is_ocremix and has_basic_tags:
-        return _from_ocremix_old_tags(path, ext, tags)
-
-    if tags_are_good:
-        return _from_tags(path, ext, tags)
-
-    return _from_filename(path, ext, is_ocremix)
+    return _auto_detect_track(path, ext, tags)

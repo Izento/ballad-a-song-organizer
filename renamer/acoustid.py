@@ -176,6 +176,53 @@ def _select_recording(response: dict, path: str) -> tuple[float, dict] | None:
     return None
 
 
+def _cached_lookup(cache: dict, key: str) -> tuple[bool, dict | None]:
+    with _CACHE_LOCK:
+        if key in cache:
+            return True, cache[key]
+    return False, None
+
+
+def _lookup_result(
+    acoustid,
+    path: str,
+    api_key: str,
+) -> tuple[bool, dict | None]:
+    fingerprint, duration, fingerprint_error = fingerprint_file_details(path)
+    if fingerprint_error or not fingerprint or duration is None:
+        return False, None
+
+    response = _REQUEST_POLICY.request(
+        lambda: acoustid.lookup(
+            api_key,
+            fingerprint,
+            duration,
+            meta=['recordings', 'sources'],
+        ),
+        transient_errors=(
+            acoustid.WebServiceError,
+            acoustid.NoBackendError,
+            OSError,
+        ),
+    )
+    if response.get("status") != "ok":
+        raise acoustid.WebServiceError(
+            f"AcoustID response status: {response.get('status')}"
+        )
+    selected = _select_recording(response, path)
+    if selected is None:
+        return True, None
+    score, recording = selected
+    result = _parse_result(
+        _recording_artist(recording) or "",
+        recording["title"],
+        score,
+        recording_id=recording.get("id"),
+    )
+    result["sources"] = _source_count(recording)
+    return True, result
+
+
 def lookup(path: str, api_key: str) -> dict | None:
     """
     Fingerprint an audio file and query AcoustID.
@@ -188,55 +235,19 @@ def lookup(path: str, api_key: str) -> dict | None:
     """
     cache = _load_cache()
     key = _file_key(path)
-
-    with _CACHE_LOCK:
-        if key in cache:
-            return cache[key]  # None means "looked up, no confident match"
-
+    has_cached_result, cached_result = _cached_lookup(cache, key)
+    if has_cached_result:
+        return cached_result
     try:
         import acoustid
     except ImportError as exc:
         raise RuntimeError(
             'pyacoustid is not installed. Run: uv pip install pyacoustid'
         ) from exc
-
-    fpcalc = resolve_fpcalc()
-    if not fpcalc:
+    if not resolve_fpcalc():
         return None
-    result = None
     try:
-        fingerprint, duration, fingerprint_error = fingerprint_file_details(path)
-        if fingerprint_error or not fingerprint or duration is None:
-            return None
-
-        response = _REQUEST_POLICY.request(
-            lambda: acoustid.lookup(
-                api_key,
-                fingerprint,
-                duration,
-                meta=['recordings', 'sources'],
-            ),
-            transient_errors=(
-                acoustid.WebServiceError,
-                acoustid.NoBackendError,
-                OSError,
-            ),
-        )
-        if response.get("status") != "ok":
-            raise acoustid.WebServiceError(
-                f"AcoustID response status: {response.get('status')}"
-            )
-        selected = _select_recording(response, path)
-        if selected is not None:
-            score, recording = selected
-            result = _parse_result(
-                _recording_artist(recording) or "",
-                recording["title"],
-                score,
-                recording_id=recording.get("id"),
-            )
-            result["sources"] = _source_count(recording)
-
+        should_cache, result = _lookup_result(acoustid, path, api_key)
     except (
         acoustid.FingerprintGenerationError,
         acoustid.WebServiceError,
@@ -247,7 +258,8 @@ def lookup(path: str, api_key: str) -> dict | None:
         # fpcalc missing/broken, API error, or file unreadable.
         # Don't cache transient errors — allow a retry next run.
         return None
-
+    if not should_cache:
+        return None
     with _CACHE_LOCK:
         cache[key] = result
     if _cache_should_flush():

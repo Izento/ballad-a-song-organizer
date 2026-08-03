@@ -22,42 +22,55 @@ def _uses_online_extraction(
     )
 
 
-def extract_tracks(
+def _extract_path(
+    path: str,
+    *,
+    strategy: str | None,
+    acoustid_key: str | None,
+    extract: ExtractTrack,
+) -> tuple[TrackInfo | None, Exception | None]:
+    try:
+        return extract(
+            path,
+            strategy=strategy,
+            acoustid_key=acoustid_key,
+        ), None
+    except (OSError, ValueError) as exc:
+        return None, exc
+
+
+def _extract_sequentially(
     paths: list[str],
+    *,
     strategy: str | None,
     acoustid_key: str | None,
     progress: ProgressCallback | None,
     cancel_event,
-    *,
-    extract: ExtractTrack = extract_track,
+    extract: ExtractTrack,
 ) -> dict[int, tuple[TrackInfo | None, Exception | None]]:
-    """Extract tracks in order while pipelining online fingerprint work."""
-    def one(path: str) -> tuple[TrackInfo | None, Exception | None]:
-        try:
-            return (
-                extract(
-                    path,
-                    strategy=strategy,
-                    acoustid_key=acoustid_key,
-                ),
-                None,
-            )
-        except (OSError, ValueError) as exc:
-            return None, exc
+    tracks = {}
+    for index, path in enumerate(paths):
+        if cancel_event is not None and cancel_event.is_set():
+            break
+        emit(progress, "extract", index + 1, len(paths), path)
+        tracks[index] = _extract_path(
+            path,
+            strategy=strategy,
+            acoustid_key=acoustid_key,
+            extract=extract,
+        )
+    return tracks
 
-    if not paths or (
-        cancel_event is not None and cancel_event.is_set()
-    ):
-        return {}
-    if not _uses_online_extraction(strategy, acoustid_key):
-        tracks = {}
-        for index, path in enumerate(paths):
-            if cancel_event is not None and cancel_event.is_set():
-                break
-            emit(progress, "extract", index + 1, len(paths), path)
-            tracks[index] = one(path)
-        return tracks
 
+def _extract_concurrently(
+    paths: list[str],
+    *,
+    strategy: str | None,
+    acoustid_key: str | None,
+    progress: ProgressCallback | None,
+    cancel_event,
+    extract: ExtractTrack,
+) -> dict[int, tuple[TrackInfo | None, Exception | None]]:
     worker_count = min(ONLINE_EXTRACTION_WORKERS, len(paths))
     tracks: dict[int, tuple[TrackInfo | None, Exception | None]] = {}
     executor = ThreadPoolExecutor(
@@ -69,7 +82,14 @@ def extract_tracks(
     completed = 0
     try:
         while next_index < len(paths) and len(futures) < worker_count:
-            futures[executor.submit(one, paths[next_index])] = next_index
+            future = executor.submit(
+                _extract_path,
+                paths[next_index],
+                strategy=strategy,
+                acoustid_key=acoustid_key,
+                extract=extract,
+            )
+            futures[future] = next_index
             next_index += 1
         while futures:
             done, _ = wait(futures, return_when=FIRST_COMPLETED)
@@ -77,23 +97,57 @@ def extract_tracks(
                 index = futures.pop(future)
                 tracks[index] = future.result()
                 completed += 1
-                emit(
-                    progress,
-                    "extract",
-                    completed,
-                    len(paths),
-                    paths[index],
-                )
+                emit(progress, "extract", completed, len(paths), paths[index])
             if cancel_event is not None and cancel_event.is_set():
                 for future in futures:
                     future.cancel()
                 break
             while next_index < len(paths) and len(futures) < worker_count:
-                futures[executor.submit(one, paths[next_index])] = next_index
+                future = executor.submit(
+                    _extract_path,
+                    paths[next_index],
+                    strategy=strategy,
+                    acoustid_key=acoustid_key,
+                    extract=extract,
+                )
+                futures[future] = next_index
                 next_index += 1
     finally:
         executor.shutdown(wait=True, cancel_futures=True)
     return tracks
+
+
+def extract_tracks(
+    paths: list[str],
+    strategy: str | None,
+    acoustid_key: str | None,
+    progress: ProgressCallback | None,
+    cancel_event,
+    *,
+    extract: ExtractTrack = extract_track,
+) -> dict[int, tuple[TrackInfo | None, Exception | None]]:
+    """Extract tracks in order while pipelining online fingerprint work."""
+    if not paths or (
+        cancel_event is not None and cancel_event.is_set()
+    ):
+        return {}
+    if not _uses_online_extraction(strategy, acoustid_key):
+        return _extract_sequentially(
+            paths,
+            strategy=strategy,
+            acoustid_key=acoustid_key,
+            progress=progress,
+            cancel_event=cancel_event,
+            extract=extract,
+        )
+    return _extract_concurrently(
+        paths,
+        strategy=strategy,
+        acoustid_key=acoustid_key,
+        progress=progress,
+        cancel_event=cancel_event,
+        extract=extract,
+    )
 
 
 __all__ = ["ONLINE_EXTRACTION_WORKERS", "extract_tracks"]

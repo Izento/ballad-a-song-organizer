@@ -153,6 +153,57 @@ def _proposal_for_track(
     )
 
 
+def _quarantine_issue(path: str):
+    return issue(
+        canonical_path(path),
+        "quarantined",
+        "Skipped rename: match ignored by user quarantine.",
+    )
+
+
+def _plan_extracted_track(
+    path: str,
+    track: TrackInfo | None,
+    extraction_error: Exception | None,
+    *,
+    strategy: str | None,
+    lookup: bool,
+    acoustid_key: str | None,
+    extract,
+    enrich,
+    media_reader,
+):
+    if extraction_error is not None:
+        return None, issue(path, "rename", str(extraction_error))
+    try:
+        if track is None:
+            raise ValueError("No extractable identity")
+        track, online_conflict, track_error = _resolve_track(
+            path,
+            track,
+            strategy=strategy,
+            lookup=lookup,
+            acoustid_key=acoustid_key,
+            extract=extract,
+            enrich=enrich,
+        )
+        if track_error:
+            category = (
+                "identity-conflict"
+                if "automatic rename blocked" in track_error
+                else "rename"
+            )
+            return None, issue(canonical_path(path), category, track_error)
+        return _proposal_for_track(
+            path,
+            track,
+            online_conflict,
+            media_reader=media_reader,
+        ), None
+    except (OSError, ValueError) as exc:
+        return None, issue(canonical_path(path), "rename", str(exc))
+
+
 def plan_renames(
     folder_path: str,
     strategy: str | None = None,
@@ -181,57 +232,26 @@ def plan_renames(
     )
     for index, path in enumerate(paths, start=1):
         if is_quarantined(path):
-            issues.append(
-                issue(
-                    canonical_path(path),
-                    "quarantined",
-                    "Skipped rename: match ignored by user quarantine.",
-                )
-            )
+            issues.append(_quarantine_issue(path))
             continue
         result = extracted.get(index - 1)
         if result is None:
             break
-        track, extraction_error = result
-        if extraction_error is not None:
-            issues.append(
-                issue(path, "rename", str(extraction_error))
-            )
-            continue
         emit(progress, "review", index, len(paths), path)
-        try:
-            if track is None:
-                raise ValueError("No extractable identity")
-            track, online_conflict, track_error = _resolve_track(
-                path,
-                track,
-                strategy=strategy,
-                lookup=lookup,
-                acoustid_key=acoustid_key,
-                extract=extract,
-                enrich=enrich,
-            )
-            if track_error:
-                issues.append(
-                    issue(
-                        canonical_path(path),
-                        "identity-conflict"
-                        if "automatic rename blocked" in track_error
-                        else "rename",
-                        track_error,
-                    )
-                )
-                continue
-            proposal = _proposal_for_track(
-                path,
-                track,
-                online_conflict,
-                media_reader=media_reader,
-            )
-            if proposal is not None:
-                proposals.append(proposal)
-        except (OSError, ValueError) as exc:
-            issues.append(issue(canonical_path(path), "rename", str(exc)))
+        proposal, planning_issue = _plan_extracted_track(
+            path,
+            *result,
+            strategy=strategy,
+            lookup=lookup,
+            acoustid_key=acoustid_key,
+            extract=extract,
+            enrich=enrich,
+            media_reader=media_reader,
+        )
+        if planning_issue is not None:
+            issues.append(planning_issue)
+        elif proposal is not None:
+            proposals.append(proposal)
     return refresh_rename_readiness(proposals), issues
 
 

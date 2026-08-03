@@ -174,74 +174,113 @@ def _identity_overrides(renames, tags) -> dict[str, tuple[str, str]]:
     return overrides
 
 
-def analyze_folder(
+def _enriched_results(
     folder_path: str,
-    strategy: str | None = None,
-    recursive: bool = True,
-    lookup: bool = False,
-    acoustid_key: str | None = None,
-    include_duplicates: bool = True,
-    fingerprint: bool = False,
-    enrich_metadata: bool = False,
-    include_artwork: bool = True,
-    include_renames: bool = True,
-    progress: ProgressCallback | None = None,
-    cancel_event=None,
-) -> ReviewPlan:
-    """Build one immutable review plan for the selected root."""
-    if enrich_metadata:
-        if include_duplicates:
-            # Enrichment is mostly idle time waiting on MusicBrainz's rate
-            # limit; hashing every file for dedup is pure disk/CPU work with
-            # no waiting. Running them on separate threads overlaps the two
-            # instead of paying for them back-to-back.
-            with ThreadPoolExecutor(
-                max_workers=1,
-                thread_name_prefix="ballad-dedup-collect",
-            ) as executor:
-                collect_future = executor.submit(
-                    _collect_duplicate_tracks,
-                    folder_path,
-                    recursive=recursive,
-                    fingerprint=fingerprint,
-                    progress=progress,
-                    cancel_event=cancel_event,
-                )
-                renames, tags, issues = _run_enrichment(
-                    folder_path,
-                    recursive=recursive,
-                    acoustid_key=acoustid_key,
-                    include_artwork=include_artwork,
-                    include_renames=include_renames,
-                    progress=progress,
-                    cancel_event=cancel_event,
-                )
-                tracks, collect_issues = collect_future.result()
-            duplicate_findings, duplicate_issues = _grouped_duplicate_findings(
-                folder_path,
-                tracks,
-                identity_overrides=_identity_overrides(renames, tags),
-            )
-            duplicate_issues = [*collect_issues, *duplicate_issues]
-        else:
-            renames, tags, issues = _run_enrichment(
-                folder_path,
-                recursive=recursive,
-                acoustid_key=acoustid_key,
-                include_artwork=include_artwork,
-                include_renames=include_renames,
-                progress=progress,
-                cancel_event=cancel_event,
-            )
-            duplicate_findings, duplicate_issues = [], []
-        return ReviewPlan.create(
-            root=folder_path,
+    *,
+    recursive: bool,
+    acoustid_key: str | None,
+    include_duplicates: bool,
+    fingerprint: bool,
+    include_artwork: bool,
+    include_renames: bool,
+    progress,
+    cancel_event,
+):
+    """Run enrichment with duplicate collection when both are requested."""
+    if not include_duplicates:
+        renames, tags, issues = _run_enrichment(
+            folder_path,
             recursive=recursive,
-            rename_proposals=renames,
-            tag_proposals=tags,
-            duplicate_findings=duplicate_findings,
-            issues=[*issues, *duplicate_issues],
+            acoustid_key=acoustid_key,
+            include_artwork=include_artwork,
+            include_renames=include_renames,
+            progress=progress,
+            cancel_event=cancel_event,
         )
+        return renames, tags, issues, [], []
+    # Enrichment is mostly idle time waiting on MusicBrainz's rate limit;
+    # hashing every file for dedup is pure disk/CPU work with no waiting.
+    with ThreadPoolExecutor(
+        max_workers=1,
+        thread_name_prefix="ballad-dedup-collect",
+    ) as executor:
+        collect_future = executor.submit(
+            _collect_duplicate_tracks,
+            folder_path,
+            recursive=recursive,
+            fingerprint=fingerprint,
+            progress=progress,
+            cancel_event=cancel_event,
+        )
+        renames, tags, issues = _run_enrichment(
+            folder_path,
+            recursive=recursive,
+            acoustid_key=acoustid_key,
+            include_artwork=include_artwork,
+            include_renames=include_renames,
+            progress=progress,
+            cancel_event=cancel_event,
+        )
+        tracks, collect_issues = collect_future.result()
+    duplicate_findings, duplicate_issues = _grouped_duplicate_findings(
+        folder_path,
+        tracks,
+        identity_overrides=_identity_overrides(renames, tags),
+    )
+    return renames, tags, issues, duplicate_findings, [
+        *collect_issues,
+        *duplicate_issues,
+    ]
+
+
+def _enriched_review_plan(
+    folder_path: str,
+    *,
+    recursive: bool,
+    acoustid_key: str | None,
+    include_duplicates: bool,
+    fingerprint: bool,
+    include_artwork: bool,
+    include_renames: bool,
+    progress,
+    cancel_event,
+) -> ReviewPlan:
+    """Build a review plan from MusicBrainz-backed enrichment."""
+    renames, tags, issues, duplicate_findings, duplicate_issues = _enriched_results(
+        folder_path,
+        recursive=recursive,
+        acoustid_key=acoustid_key,
+        include_duplicates=include_duplicates,
+        fingerprint=fingerprint,
+        include_artwork=include_artwork,
+        include_renames=include_renames,
+        progress=progress,
+        cancel_event=cancel_event,
+    )
+    return ReviewPlan.create(
+        root=folder_path,
+        recursive=recursive,
+        rename_proposals=renames,
+        tag_proposals=tags,
+        duplicate_findings=duplicate_findings,
+        issues=[*issues, *duplicate_issues],
+    )
+
+
+def _standard_review_plan(
+    folder_path: str,
+    *,
+    strategy: str | None,
+    recursive: bool,
+    lookup: bool,
+    acoustid_key: str | None,
+    include_duplicates: bool,
+    fingerprint: bool,
+    include_renames: bool,
+    progress,
+    cancel_event,
+) -> ReviewPlan:
+    """Build a review plan from local tags and filename extraction."""
     renames, rename_issues = (
         plan_renames(
             folder_path,
@@ -261,10 +300,7 @@ def analyze_folder(
         progress=progress,
         cancel_event=cancel_event,
     )
-    tags, coordination_issues, synchronized = coordinate_tag_proposals(
-        renames,
-        tags,
-    )
+    tags, coordination_issues, synchronized = coordinate_tag_proposals(renames, tags)
     tag_issues = [
         item
         for item in tag_issues
@@ -288,6 +324,47 @@ def analyze_folder(
         tag_proposals=tags,
         duplicate_findings=duplicate_findings,
         issues=[*rename_issues, *tag_issues, *duplicate_issues],
+    )
+
+
+def analyze_folder(
+    folder_path: str,
+    strategy: str | None = None,
+    recursive: bool = True,
+    lookup: bool = False,
+    acoustid_key: str | None = None,
+    include_duplicates: bool = True,
+    fingerprint: bool = False,
+    enrich_metadata: bool = False,
+    include_artwork: bool = True,
+    include_renames: bool = True,
+    progress: ProgressCallback | None = None,
+    cancel_event=None,
+) -> ReviewPlan:
+    """Build one immutable review plan for the selected root."""
+    if enrich_metadata:
+        return _enriched_review_plan(
+            folder_path,
+            recursive=recursive,
+            acoustid_key=acoustid_key,
+            include_duplicates=include_duplicates,
+            fingerprint=fingerprint,
+            include_artwork=include_artwork,
+            include_renames=include_renames,
+            progress=progress,
+            cancel_event=cancel_event,
+        )
+    return _standard_review_plan(
+        folder_path,
+        strategy=strategy,
+        recursive=recursive,
+        lookup=lookup,
+        acoustid_key=acoustid_key,
+        include_duplicates=include_duplicates,
+        fingerprint=fingerprint,
+        include_renames=include_renames,
+        progress=progress,
+        cancel_event=cancel_event,
     )
 
 

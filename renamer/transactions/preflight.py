@@ -60,58 +60,75 @@ def selected_proposals(
     return renames, tags
 
 
+def _validate_rename_source(item: RenameProposal, block) -> None:
+    if not os.path.isfile(item.old_path):
+        block(
+            item.id,
+            item.old_path,
+            f"Source file is missing: {item.old_path}",
+        )
+        return
+    if not item.snapshot.matches(item.old_path):
+        block(
+            item.id,
+            item.old_path,
+            f"Source changed since analysis: {item.old_path}",
+        )
+
+
+def _validate_staged_artwork(item: TagProposal, block) -> None:
+    try:
+        artwork = ArtworkRef(**item.artwork_after.to_dict())
+    except (TypeError, ValueError) as exc:
+        block(item.id, item.path, f"Invalid staged artwork: {exc}")
+        return
+    if not verify_artwork(artwork):
+        block(
+            item.id,
+            item.path,
+            "Staged artwork is missing or changed.",
+        )
+
+
+def _validate_tag_source(item: TagProposal, block) -> None:
+    if not os.path.isfile(item.path):
+        block(item.id, item.path, f"Tag source is missing: {item.path}")
+        return
+    if not item.snapshot.matches(item.path):
+        block(
+            item.id,
+            item.path,
+            f"Tag source changed since analysis: {item.path}",
+        )
+        return
+    if not supports_tag_writing(item.path):
+        extension = Path(item.path).suffix.lower() or "this file type"
+        block(
+            item.id,
+            item.path,
+            f"Tag writing is not supported for {extension} files.",
+        )
+        return
+    if is_placeholder_artist(str(item.after.get("artist") or "")):
+        block(
+            item.id,
+            item.path,
+            "Placeholder artist metadata cannot be applied.",
+        )
+        return
+    if item.artwork_after:
+        _validate_staged_artwork(item, block)
+
+
 def _validate_sources(
     renames: list[RenameProposal],
     tags: list[TagProposal],
     block,
 ) -> None:
     for item in renames:
-        if not os.path.isfile(item.old_path):
-            block(
-                item.id,
-                item.old_path,
-                f"Source file is missing: {item.old_path}",
-            )
-        elif not item.snapshot.matches(item.old_path):
-            block(
-                item.id,
-                item.old_path,
-                f"Source changed since analysis: {item.old_path}",
-            )
+        _validate_rename_source(item, block)
     for item in tags:
-        if not os.path.isfile(item.path):
-            block(item.id, item.path, f"Tag source is missing: {item.path}")
-        elif not item.snapshot.matches(item.path):
-            block(
-                item.id,
-                item.path,
-                f"Tag source changed since analysis: {item.path}",
-            )
-        elif not supports_tag_writing(item.path):
-            extension = Path(item.path).suffix.lower() or "this file type"
-            block(
-                item.id,
-                item.path,
-                f"Tag writing is not supported for {extension} files.",
-            )
-        elif is_placeholder_artist(str(item.after.get("artist") or "")):
-            block(
-                item.id,
-                item.path,
-                "Placeholder artist metadata cannot be applied.",
-            )
-        elif item.artwork_after:
-            try:
-                artwork = ArtworkRef(**item.artwork_after.to_dict())
-            except (TypeError, ValueError) as exc:
-                block(item.id, item.path, f"Invalid staged artwork: {exc}")
-            else:
-                if not verify_artwork(artwork):
-                    block(
-                        item.id,
-                        item.path,
-                        "Staged artwork is missing or changed.",
-                    )
+        _validate_tag_source(item, block)
 
 
 def _validate_unique_sources(
@@ -171,7 +188,7 @@ def _validate_temporary_space(
             block(item.id, item.path, message)
 
 
-def _validate_destinations(
+def _validate_duplicate_destinations(
     renames: list[RenameProposal],
     blocked: dict[str, ApplyResult],
     block,
@@ -189,55 +206,82 @@ def _validate_destinations(
             )
             continue
         key = path_key(item.new_path)
-        if key in destinations:
-            other = destinations[key]
-            message = f"Multiple selected proposals target {item.new_path}"
-            block(other.id, other.old_path, message)
-            block(item.id, item.old_path, message)
-        else:
+        if key not in destinations:
             destinations[key] = item
+            continue
+        other = destinations[key]
+        message = f"Multiple selected proposals target {item.new_path}"
+        block(other.id, other.old_path, message)
+        block(item.id, item.old_path, message)
+
+
+def _eligible_source_keys(
+    renames: list[RenameProposal],
+    blocked: dict[str, ApplyResult],
+) -> set[str]:
+    return {
+        path_key(item.old_path)
+        for item in renames
+        if item.id not in blocked
+    }
+
+
+def _destination_is_blocked(item: RenameProposal, source_keys: set[str], block) -> bool:
+    parent = Path(item.new_path).parent
+    if not parent.is_dir():
+        block(
+            item.id,
+            item.old_path,
+            f"Destination folder does not exist: {parent}",
+        )
+        return True
+    try:
+        existing = {
+            path_key(str(candidate))
+            for candidate in parent.iterdir()
+            if candidate.exists()
+        }
+    except OSError as exc:
+        block(
+            item.id,
+            item.old_path,
+            f"Cannot inspect destination folder: {exc}",
+        )
+        return True
+    destination = path_key(item.new_path)
+    if destination in existing and destination not in source_keys:
+        block(
+            item.id,
+            item.old_path,
+            f"Destination already exists: {item.new_path}",
+        )
+        return True
+    return False
+
+
+def _validate_destination_existence(
+    renames: list[RenameProposal],
+    blocked: dict[str, ApplyResult],
+    block,
+) -> None:
     changed = True
     while changed:
         changed = False
-        source_keys = {
-            path_key(item.old_path)
-            for item in renames
-            if item.id not in blocked
-        }
+        source_keys = _eligible_source_keys(renames, blocked)
         for item in renames:
             if item.id in blocked:
                 continue
-            parent = Path(item.new_path).parent
-            if not parent.is_dir():
-                block(
-                    item.id,
-                    item.old_path,
-                    f"Destination folder does not exist: {parent}",
-                )
+            if _destination_is_blocked(item, source_keys, block):
                 changed = True
-                continue
-            try:
-                existing = {
-                    path_key(str(candidate))
-                    for candidate in parent.iterdir()
-                    if candidate.exists()
-                }
-            except OSError as exc:
-                block(
-                    item.id,
-                    item.old_path,
-                    f"Cannot inspect destination folder: {exc}",
-                )
-                changed = True
-                continue
-            destination = path_key(item.new_path)
-            if destination in existing and destination not in source_keys:
-                block(
-                    item.id,
-                    item.old_path,
-                    f"Destination already exists: {item.new_path}",
-                )
-                changed = True
+
+
+def _validate_destinations(
+    renames: list[RenameProposal],
+    blocked: dict[str, ApplyResult],
+    block,
+) -> None:
+    _validate_duplicate_destinations(renames, blocked, block)
+    _validate_destination_existence(renames, blocked, block)
 
 
 def preflight(

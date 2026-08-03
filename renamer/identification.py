@@ -28,6 +28,47 @@ def _existing_recording_id(tags: dict[str, str]) -> str:
     return ""
 
 
+def _cached_evidence(cache, key: str) -> RecordingEvidence | None:
+    cached = cache.get("identification", key)
+    if cached is None:
+        return None
+    return RecordingEvidence(
+        **{
+            **cached,
+            "warnings": tuple(cached.get("warnings", ())),
+            "provenance": tuple(cached.get("provenance", ())),
+        }
+    )
+
+
+def _unidentified_evidence(
+    tags: dict[str, str],
+    warning: str,
+) -> RecordingEvidence:
+    return RecordingEvidence(
+        artist=tags.get("artist", ""),
+        title=tags.get("title", ""),
+        warnings=(warning,),
+    )
+
+
+def _matched_evidence(path: str, matched: dict) -> RecordingEvidence:
+    online_title = matched.get("title", "")
+    recording_id = matched.get("recording_id", "")
+    resolution = reconcile_online_version(path, online_title, recording_id)
+    hint = filename_identity_hint(path)
+    return RecordingEvidence(
+        artist=matched.get("artist", "") or (hint[0] if hint else ""),
+        title=resolution.title,
+        exact_recording_id=resolution.exact_recording_id,
+        derived_from_recording_id=resolution.derived_from_recording_id,
+        acoustid_score=matched.get("score"),
+        confidence="medium" if recording_id else "low",
+        warnings=(resolution.warning,) if resolution.warning else (),
+        provenance=("AcoustID fingerprint",),
+    )
+
+
 def identify(
     path: str,
     *,
@@ -47,52 +88,27 @@ def identify(
         )
 
     if not acoustid_key:
-        return RecordingEvidence(
-            artist=source_tags.get("artist", ""),
-            title=source_tags.get("title", ""),
-            warnings=("No online identification key is configured.",),
+        return _unidentified_evidence(
+            source_tags,
+            "No online identification key is configured.",
         )
-
     cache = enrichment_cache()
     key = _cache_key(path)
-    cached = cache.get("identification", key)
-    if cached is not None:
-        return RecordingEvidence(
-            **{
-                **cached,
-                "warnings": tuple(cached.get("warnings", ())),
-                "provenance": tuple(cached.get("provenance", ())),
-            }
-        )
-
+    if cached := _cached_evidence(cache, key):
+        return cached
     if acoustid_lookup is None:
         from .acoustid import lookup
 
         acoustid_lookup = lookup
     matched = acoustid_lookup(path, acoustid_key)
     if not matched:
-        evidence = RecordingEvidence(
-            artist=source_tags.get("artist", ""),
-            title=source_tags.get("title", ""),
-            warnings=("No confident AcoustID recording match.",),
+        evidence = _unidentified_evidence(
+            source_tags,
+            "No confident AcoustID recording match.",
         )
         cache.set("identification", key, evidence.to_dict(), ttl_seconds=86400)
         return evidence
-
-    online_title = matched.get("title", "")
-    recording_id = matched.get("recording_id", "")
-    resolution = reconcile_online_version(path, online_title, recording_id)
-    hint = filename_identity_hint(path)
-    evidence = RecordingEvidence(
-        artist=matched.get("artist", "") or (hint[0] if hint else ""),
-        title=resolution.title,
-        exact_recording_id=resolution.exact_recording_id,
-        derived_from_recording_id=resolution.derived_from_recording_id,
-        acoustid_score=matched.get("score"),
-        confidence="medium" if recording_id else "low",
-        warnings=(resolution.warning,) if resolution.warning else (),
-        provenance=("AcoustID fingerprint",),
-    )
+    evidence = _matched_evidence(path, matched)
     cache.set("identification", key, evidence.to_dict())
     return evidence
 

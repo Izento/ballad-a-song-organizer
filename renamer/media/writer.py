@@ -51,14 +51,20 @@ def _legacy_expected(path: str) -> dict[str, Any] | None:
     return parsed_tag_values(parsed) if parsed is not None else None
 
 
-def write_tags_to_file(
-    path: str,
-    expected_tags: Mapping[str, Any] | None = None,
-    artwork: ArtworkDescriptor | StagedArtwork | Mapping[str, Any] | None = None,
-    *,
-    remove_artwork: bool = False,
-) -> dict[str, str]:
-    """Write canonical tags and optional front artwork to one media file."""
+def _artwork_matches(
+    media: Any,
+    artwork: ArtworkDescriptor | StagedArtwork | Mapping[str, Any] | None,
+    remove_artwork: bool,
+) -> bool:
+    return (
+        media.artwork is None
+        if remove_artwork
+        else artwork is None
+        or (media.artwork is not None and media.artwork.sha256 == str(artwork.get("sha256") or ""))
+    )
+
+
+def _write_context(path: str) -> tuple[Any, Any] | dict[str, str]:
     extension = Path(path).suffix.casefold()
     adapter = _ADAPTERS.get(extension)
     if adapter is None:
@@ -66,6 +72,7 @@ def write_tags_to_file(
             "status": "skipped",
             "reason": f"Unsupported format: {extension}",
         }
+
     media = read_media(path)
     if not media.usable:
         return {
@@ -77,6 +84,40 @@ def write_tags_to_file(
             "status": "skipped",
             "reason": "Raw AAC is not a writable MP4 container",
         }
+    return adapter, media
+
+
+def _write_media(
+    adapter: Any,
+    path: str,
+    expected: Mapping[str, Any],
+    artwork: ArtworkDescriptor | StagedArtwork | Mapping[str, Any] | None,
+    remove_artwork: bool,
+) -> dict[str, str]:
+    try:
+        adapter.write(
+            path,
+            expected,
+            _artwork_bytes(artwork),
+            replace_artwork=artwork is not None or remove_artwork,
+        )
+    except Exception as exc:  # Mutagen has container-specific exception families.
+        return {"status": "error", "reason": str(exc)}
+    return {"status": "updated"}
+
+
+def write_tags_to_file(
+    path: str,
+    expected_tags: Mapping[str, Any] | None = None,
+    artwork: ArtworkDescriptor | StagedArtwork | Mapping[str, Any] | None = None,
+    *,
+    remove_artwork: bool = False,
+) -> dict[str, str]:
+    """Write canonical tags and optional front artwork to one media file."""
+    context = _write_context(path)
+    if isinstance(context, dict):
+        return context
+    adapter, media = context
 
     if expected_tags is None:
         expected_tags = _legacy_expected(path)
@@ -91,28 +132,13 @@ def write_tags_to_file(
             "status": "skipped",
             "reason": "No supported tag values to write",
         }
-    artwork_matches = (
-        media.artwork is None
-        if remove_artwork
-        else artwork is None
-        or (
-            media.artwork is not None
-            and media.artwork.sha256 == str(artwork.get("sha256") or "")
-        )
-    )
-    if metadata_matches(expected, media.tags) and artwork_matches:
+    if metadata_matches(
+        expected,
+        media.tags,
+    ) and _artwork_matches(media, artwork, remove_artwork):
         return {"status": "already_ok"}
 
-    try:
-        adapter.write(
-            path,
-            expected,
-            _artwork_bytes(artwork),
-            replace_artwork=artwork is not None or remove_artwork,
-        )
-    except Exception as exc:  # Mutagen has container-specific exception families.
-        return {"status": "error", "reason": str(exc)}
-    return {"status": "updated"}
+    return _write_media(adapter, path, expected, artwork, remove_artwork)
 
 
 def _write_mp3(path: str, values: Mapping[str, Any], artwork=None) -> None:

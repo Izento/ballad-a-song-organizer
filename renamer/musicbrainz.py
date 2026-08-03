@@ -95,6 +95,62 @@ def _rate_limit() -> None:
     _REQUEST_LIMITER.wait()
 
 
+def _populate_album_track_cache(
+    cache_key: str,
+    album: str,
+    artist_hint: str,
+) -> None:
+    mb = _mb()
+    try:
+        _rate_limit()
+        query_kwargs = {'release': album, 'limit': 3}
+        if artist_hint:
+            query_kwargs['artist'] = artist_hint
+        result = mb.search_releases(**query_kwargs)
+        releases = result.get('release-list', [])
+        if not releases:
+            _RELEASE_CACHE[cache_key] = []
+            return
+        candidate, _warnings = select_release(
+            releases,
+            {"album": album, "album_artist": artist_hint},
+        )
+        if candidate is None:
+            _RELEASE_CACHE[cache_key] = []
+            return
+        _rate_limit()
+        release = mb.get_release_by_id(
+            candidate.release_id,
+            includes=['recordings'],
+        )
+        _RELEASE_CACHE[cache_key] = [
+            track
+            for medium in release['release'].get('medium-list', [])
+            for track in medium.get('track-list', [])
+        ]
+    except (mb.MusicBrainzError, KeyError, TypeError, ValueError):
+        _RELEASE_CACHE[cache_key] = []
+
+
+def _track_by_number(
+    tracks: list,
+    track_num: int,
+    artist_hint: str,
+) -> dict | None:
+    for track in tracks:
+        if int(track.get('position', -1)) == track_num:
+            rec = track.get('recording', {})
+            artist_credits = rec.get('artist-credit', [])
+            artist_name = artist_hint
+            if artist_credits and isinstance(artist_credits[0], dict):
+                artist_name = artist_credits[0].get('artist', {}).get(
+                    'name',
+                    artist_hint,
+                )
+            return {'artist': artist_name, 'title': rec.get('title', '')}
+    return None
+
+
 def lookup_track_by_album(album: str, track_num: int, artist_hint: str = '') -> dict | None:
     """
     Find a track title by album name and track number.
@@ -106,61 +162,10 @@ def lookup_track_by_album(album: str, track_num: int, artist_hint: str = '') -> 
     """
     if not _available():
         return None
-
     cache_key = f"{album}||{artist_hint}"
-
     if cache_key not in _RELEASE_CACHE:
-        mb = _mb()
-        try:
-            _rate_limit()
-            query_kwargs = {'release': album, 'limit': 3}
-            if artist_hint:
-                query_kwargs['artist'] = artist_hint
-
-            result = mb.search_releases(**query_kwargs)
-            releases = result.get('release-list', [])
-            if not releases:
-                _RELEASE_CACHE[cache_key] = []
-                return None
-
-            candidate, _warnings = select_release(
-                releases,
-                {
-                    "album": album,
-                    "album_artist": artist_hint,
-                },
-            )
-            if candidate is None:
-                _RELEASE_CACHE[cache_key] = []
-                return None
-            _rate_limit()
-            release = mb.get_release_by_id(
-                candidate.release_id,
-                includes=['recordings'],
-            )
-
-            tracks = []
-            for medium in release['release'].get('medium-list', []):
-                tracks.extend(medium.get('track-list', []))
-            _RELEASE_CACHE[cache_key] = tracks
-
-        except (mb.MusicBrainzError, KeyError, TypeError, ValueError):
-            _RELEASE_CACHE[cache_key] = []
-            return None
-
-    for track in _RELEASE_CACHE[cache_key]:
-        if int(track.get('position', -1)) == track_num:
-            rec = track.get('recording', {})
-            artist_credits = rec.get('artist-credit', [])
-            artist_name = artist_hint
-            if artist_credits and isinstance(artist_credits[0], dict):
-                artist_name = artist_credits[0].get('artist', {}).get(
-                    'name',
-                    artist_hint,
-                )
-            return {'artist': artist_name, 'title': rec.get('title', '')}
-
-    return None
+        _populate_album_track_cache(cache_key, album, artist_hint)
+    return _track_by_number(_RELEASE_CACHE[cache_key], track_num, artist_hint)
 
 
 def lookup_ocremix_remixers(game: str, song_title: str) -> list[str] | None:
@@ -431,20 +436,42 @@ def _candidate_score(
     )
 
 
-def select_release(
-    releases: list[dict],
-    local_evidence: dict[str, object] | None = None,
-) -> tuple[ReleaseCandidate | None, tuple[str, ...]]:
-    """Choose a canonical release conservatively from recording appearances."""
-    candidates = [
-        _candidate_score(release, local_evidence or {})
-        for release in releases
-        if release.get("id")
+def _eligible_canonical_releases(
+    candidates: list[ReleaseCandidate],
+) -> list[ReleaseCandidate]:
+    return [
+        candidate
+        for candidate in candidates
+        if candidate.status.casefold() == "official"
+        and candidate.release_group_type not in {"compilation", "broadcast", "other"}
     ]
-    if not candidates:
-        return None, ("MusicBrainz returned no release candidates.",)
-    evidence = local_evidence or {}
-    corroborated = any(
+
+
+def _earliest_release(candidates: list[ReleaseCandidate]) -> ReleaseCandidate:
+    return min(
+        candidates,
+        key=lambda candidate: (
+            candidate.date or "9999-99-99",
+            candidate.release_id,
+        ),
+    )
+
+
+def _canonical_release_selection(
+    candidates: list[ReleaseCandidate],
+) -> tuple[ReleaseCandidate | None, tuple[str, ...]]:
+    eligible = _eligible_canonical_releases(candidates)
+    if eligible:
+        return _earliest_release(eligible), (
+            "No local release evidence; selected the earliest official non-compilation release.",
+        )
+    return None, (
+        "No suitable official canonical release; release-specific metadata was skipped.",
+    )
+
+
+def _has_release_evidence(evidence: dict[str, object]) -> bool:
+    return any(
         evidence.get(key)
         for key in (
             "album",
@@ -454,76 +481,54 @@ def select_release(
             "discnumber",
         )
     )
-    if not corroborated:
-        eligible = [
-            candidate
-            for candidate in candidates
-            if candidate.status.casefold() == "official"
-            and candidate.release_group_type not in {"compilation", "broadcast", "other"}
-        ]
-        if eligible:
-            return min(
-                eligible,
-                key=lambda candidate: (
-                    candidate.date or "9999-99-99",
-                    candidate.release_id,
-                ),
-            ), (
-                "No local release evidence; selected the earliest official non-compilation release.",
-            )
-        return None, (
-            "No suitable official canonical release; release-specific metadata was skipped.",
-        )
 
-    def ordering(candidate: ReleaseCandidate) -> tuple[int, int, str, str]:
-        official = int(candidate.status.casefold() == "official")
-        standard_type = int(candidate.release_group_type in {
-                            "album", "single", "ep"})
-        return (
-            candidate.score,
-            official + standard_type,
-            "".join("9" if character.isdigit()
-                    else character for character in candidate.date)
-            or "9999-99-99",
-            candidate.release_id,
-        )
 
-    ranked = sorted(candidates, key=ordering, reverse=True)
+def _release_ordering(candidate: ReleaseCandidate) -> tuple[int, int, str, str]:
+    official = int(candidate.status.casefold() == "official")
+    standard_type = int(candidate.release_group_type in {"album", "single", "ep"})
+    return (
+        candidate.score,
+        official + standard_type,
+        "".join(
+            "9" if character.isdigit() else character for character in candidate.date
+        )
+        or "9999-99-99",
+        candidate.release_id,
+    )
+
+
+def _ranked_release_selection(
+    candidates: list[ReleaseCandidate],
+) -> tuple[ReleaseCandidate | None, tuple[str, ...]]:
+    ranked = sorted(candidates, key=_release_ordering, reverse=True)
     best = ranked[0]
     warnings: list[str] = []
     tied = [candidate for candidate in ranked if candidate.score == best.score]
     if len(tied) > 1 and best.score > 0:
         warnings.append(
             "Multiple releases match local evidence; selected the earliest.")
-        best = min(
-            tied,
-            key=lambda candidate: (
-                candidate.date or "9999-99-99", candidate.release_id),
-        )
+        best = _earliest_release(tied)
     elif best.score <= 0:
-        eligible = [
-            candidate
-            for candidate in candidates
-            if candidate.status.casefold() == "official"
-            and candidate.release_group_type not in {"compilation", "broadcast", "other"}
-        ]
-        if eligible:
-            best = min(
-                eligible,
-                key=lambda candidate: (
-                    candidate.date or "9999-99-99",
-                    candidate.release_id,
-                ),
-            )
-            warnings.append(
-                "No local release evidence; selected the earliest official non-compilation release."
-            )
-        else:
-            warnings.append(
-                "No suitable official canonical release; release-specific metadata was skipped."
-            )
-            return None, tuple(warnings)
+        return _canonical_release_selection(candidates)
     return best, tuple(warnings)
+
+
+def select_release(
+    releases: list[dict],
+    local_evidence: dict[str, object] | None = None,
+) -> tuple[ReleaseCandidate | None, tuple[str, ...]]:
+    """Choose a canonical release conservatively from recording appearances."""
+    evidence = local_evidence or {}
+    candidates = [
+        _candidate_score(release, evidence)
+        for release in releases
+        if release.get("id")
+    ]
+    if not candidates:
+        return None, ("MusicBrainz returned no release candidates.",)
+    if not _has_release_evidence(evidence):
+        return _canonical_release_selection(candidates)
+    return _ranked_release_selection(candidates)
 
 
 def _cached_musicbrainz(
@@ -667,15 +672,7 @@ def _metadata_from_release(
     return {key: value for key, value in values.items() if value not in ("", [], None)}
 
 
-def enrich_recording(
-    recording_id: str,
-    *,
-    local_evidence: dict[str, object] | None = None,
-) -> EnrichmentResult | None:
-    """Fetch a recording, select a corroborated release, and return rich fields."""
-    if not recording_id or not _available():
-        return None
-    mb = _mb()
+def _recording_details(recording_id: str, mb) -> dict | None:
     payload = _cached_musicbrainz(
         "musicbrainz-recording",
         recording_id,
@@ -693,31 +690,58 @@ def enrich_recording(
     )
     if not payload or not payload.get("recording"):
         return None
-    recording = payload["recording"]
+    return payload["recording"]
+
+
+def _release_details(release: ReleaseCandidate | None, mb) -> dict:
+    if release is None:
+        return {}
+    payload = _cached_musicbrainz(
+        "musicbrainz-release",
+        release.release_id,
+        lambda: mb.get_release_by_id(
+            release.release_id,
+            includes=[
+                "artists",
+                "recordings",
+                "labels",
+                "release-groups",
+            ],
+        ),
+    )
+    return (payload or {}).get("release") or {}
+
+
+def _enrichment_values(
+    recording: dict,
+    detailed_release: dict,
+    recording_id: str,
+    mb,
+) -> dict[str, object]:
+    values = _metadata_from_release(recording, detailed_release, recording_id)
+    for role, names in _work_credits(recording, mb).items():
+        values.setdefault(role, names)
+    return values
+
+
+def enrich_recording(
+    recording_id: str,
+    *,
+    local_evidence: dict[str, object] | None = None,
+) -> EnrichmentResult | None:
+    """Fetch a recording, select a corroborated release, and return rich fields."""
+    if not recording_id or not _available():
+        return None
+    mb = _mb()
+    recording = _recording_details(recording_id, mb)
+    if recording is None:
+        return None
     release, warnings = select_release(
         recording.get("release-list") or [],
         local_evidence,
     )
-    detailed_release: dict = {}
-    if release is not None:
-        release_payload = _cached_musicbrainz(
-            "musicbrainz-release",
-            release.release_id,
-            lambda: mb.get_release_by_id(
-                release.release_id,
-                includes=[
-                    "artists",
-                    "recordings",
-                    "labels",
-                    "release-groups",
-                ],
-            ),
-        )
-        if release_payload:
-            detailed_release = release_payload.get("release") or {}
-    values = _metadata_from_release(recording, detailed_release, recording_id)
-    for role, names in _work_credits(recording, mb).items():
-        values.setdefault(role, names)
+    detailed_release = _release_details(release, mb)
+    values = _enrichment_values(recording, detailed_release, recording_id, mb)
     confidence = "high" if release and not warnings else "medium"
     return EnrichmentResult(
         recording_id=recording_id,

@@ -31,17 +31,10 @@ def _frame_values(frame: Any, *, split_multi: bool = False) -> list[str]:
     items = value_list(getattr(frame, "text", frame))
     if not split_multi:
         return items
-    return [
-        part.strip()
-        for item in items
-        for part in _split_joined(item)
-        if part.strip()
-    ]
+    return [part.strip() for item in items for part in _split_joined(item) if part.strip()]
 
 
-_MULTI_VALUE_FIELDS_CASEFOLD = frozenset(
-    name.casefold() for name in MULTI_VALUE_FIELDS
-)
+_MULTI_VALUE_FIELDS_CASEFOLD = frozenset(name.casefold() for name in MULTI_VALUE_FIELDS)
 
 
 def _custom_values(tags: Any) -> dict[str, list[str]]:
@@ -101,11 +94,7 @@ def read_artwork_data(audio: Any) -> tuple[bytes, str] | None:
         return None
     pictures = tags.getall("APIC")
     front = next(
-        (
-            picture
-            for picture in pictures
-            if getattr(picture, "type", None) == 3
-        ),
+        (picture for picture in pictures if getattr(picture, "type", None) == 3),
         pictures[0] if pictures else None,
     )
     if front is None:
@@ -130,17 +119,15 @@ def read_artwork(audio: Any) -> ArtworkDescriptor | None:
     )
 
 
-def write(
-    path: str,
-    values: Mapping[str, Any],
-    image: tuple[bytes, str] | None,
-    *,
-    replace_artwork: bool = False,
-) -> None:
-    replace_artwork = replace_artwork or image is not None
+def _load_tags(path: str, id3_type: Any, no_header_error: type[Exception]) -> Any:
+    try:
+        return id3_type(path)
+    except no_header_error:
+        return id3_type()
+
+
+def _id3_frame_types() -> dict[str, Any]:
     from mutagen.id3 import (
-        APIC,
-        ID3,
         TALB,
         TCOM,
         TCON,
@@ -154,19 +141,11 @@ def write(
         TPE2,
         TPE3,
         TPE4,
-        TPOS,
         TPUB,
-        TRCK,
         TSRC,
-        TXXX,
-        ID3NoHeaderError,
     )
 
-    try:
-        tags = ID3(path)
-    except ID3NoHeaderError:
-        tags = ID3()
-    frame_types = {
+    return {
         "TPE1": TPE1,
         "TIT2": TIT2,
         "TALB": TALB,
@@ -183,39 +162,69 @@ def write(
         "TSRC": TSRC,
         "TLAN": TLAN,
     }
-    for field in FIELDS:
-        if field.canonical not in values:
-            continue
-        entries = value_list(values[field.canonical])
-        # Pre-join multi-value fields ourselves into a single string rather
-        # than handing mutagen a multi-item text list: mutagen's own v2.3
-        # join (v23_sep, default "/") would reintroduce the same "/"
-        # collision this separator was chosen to avoid.
-        text = _JOIN_SEP.join(entries) if field.canonical in MULTI_VALUE_FIELDS else (
-            entries[0] if entries else ""
-        )
-        if field.id3:
-            frame_type = frame_types[field.id3]
-            if text:
-                tags.setall(
-                    field.id3,
-                    [frame_type(encoding=3, text=[text])],
-                )
-            else:
-                tags.delall(field.id3)
-            continue
-        description = field.canonical.upper()
-        if text:
-            tags.setall(
-                f"TXXX:{description}",
-                [TXXX(encoding=3, desc=description, text=[text])],
-            )
-        else:
-            tags.delall(f"TXXX:{description}")
 
+
+def _write_metadata_field(
+    tags: Any,
+    field: Any,
+    values: Mapping[str, Any],
+    frame_types: Mapping[str, Any],
+    custom_frame_type: Any,
+) -> None:
+    entries = value_list(values[field.canonical])
+    # Pre-join multi-value fields ourselves into a single string rather
+    # than handing mutagen a multi-item text list: mutagen's own v2.3
+    # join (v23_sep, default "/") would reintroduce the same "/"
+    # collision this separator was chosen to avoid.
+    text = (
+        _JOIN_SEP.join(entries)
+        if field.canonical in MULTI_VALUE_FIELDS
+        else (entries[0] if entries else "")
+    )
+    if field.id3:
+        frame_type = frame_types[field.id3]
+        if text:
+            tags.setall(field.id3, [frame_type(encoding=3, text=[text])])
+        else:
+            tags.delall(field.id3)
+        return
+
+    description = field.canonical.upper()
+    if text:
+        tags.setall(
+            f"TXXX:{description}",
+            [custom_frame_type(encoding=3, desc=description, text=[text])],
+        )
+    else:
+        tags.delall(f"TXXX:{description}")
+
+
+def _write_metadata_fields(
+    tags: Any,
+    values: Mapping[str, Any],
+    frame_types: Mapping[str, Any],
+    custom_frame_type: Any,
+) -> None:
+    for field in FIELDS:
+        if field.canonical in values:
+            _write_metadata_field(
+                tags,
+                field,
+                values,
+                frame_types,
+                custom_frame_type,
+            )
+
+
+def _write_paired_numbers(
+    tags: Any,
+    values: Mapping[str, Any],
+    track_frame_type: Any,
+    disc_frame_type: Any,
+) -> None:
     for number_key, total_key, frame_id, frame_type in (
-        ("tracknumber", "tracktotal", "TRCK", TRCK),
-        ("discnumber", "disctotal", "TPOS", TPOS),
+        ("tracknumber", "tracktotal", "TRCK", track_frame_type),
+        ("discnumber", "disctotal", "TPOS", disc_frame_type),
     ):
         if number_key not in values and total_key not in values:
             continue
@@ -225,26 +234,45 @@ def write(
         else:
             tags.delall(frame_id)
 
-    if replace_artwork:
-        retained = [
-            frame
-            for frame in tags.getall("APIC")
-            if getattr(frame, "type", None) != 3
-        ]
-        tags.delall("APIC")
-        for frame in retained:
-            tags.add(frame)
-        if image:
-            data, mime_type = image
-            tags.add(
-                APIC(
-                    encoding=3,
-                    mime=mime_type,
-                    type=3,
-                    desc="Front cover",
-                    data=data,
-                )
+
+def _replace_front_artwork(
+    tags: Any,
+    image: tuple[bytes, str] | None,
+    apic_frame_type: Any,
+) -> None:
+    retained = [frame for frame in tags.getall("APIC") if getattr(frame, "type", None) != 3]
+    tags.delall("APIC")
+    for frame in retained:
+        tags.add(frame)
+    if image:
+        data, mime_type = image
+        tags.add(
+            apic_frame_type(
+                encoding=3,
+                mime=mime_type,
+                type=3,
+                desc="Front cover",
+                data=data,
             )
+        )
+
+
+def write(
+    path: str,
+    values: Mapping[str, Any],
+    image: tuple[bytes, str] | None,
+    *,
+    replace_artwork: bool = False,
+) -> None:
+    replace_artwork = replace_artwork or image is not None
+    from mutagen.id3 import APIC, ID3, TPOS, TRCK, TXXX, ID3NoHeaderError
+
+    tags = _load_tags(path, ID3, ID3NoHeaderError)
+    _write_metadata_fields(tags, values, _id3_frame_types(), TXXX)
+    _write_paired_numbers(tags, values, TRCK, TPOS)
+
+    if replace_artwork:
+        _replace_front_artwork(tags, image, APIC)
     # v1=0: strip/never regenerate the legacy ID3v1 trailer. Mutagen's
     # default (v1=1) silently rewrites an existing v1 tag from whatever the
     # current ID3v2 frames say every time we save -- and when a field like

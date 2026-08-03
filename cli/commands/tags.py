@@ -13,61 +13,64 @@ from renamer.review_service import plan_tag_updates
 from renamer.track_extraction import scan_folder
 
 
+def _process_folder(
+    folder,
+    args: Namespace,
+    output: Output,
+) -> tuple[int, int, int, int] | None:
+    path = Path(folder.path)
+    if not path.is_dir():
+        output.print(f"[yellow]Skipping missing folder:[/yellow] {path}")
+        return None
+    recursive = folder.recursive_or(True)
+    file_count = len(scan_folder(str(path), recursive=recursive))
+    proposals, issues = plan_tag_updates(str(path), recursive=recursive)
+    results = []
+    succeeded = 0
+    problems = len(issues)
+    if args.apply and proposals:
+        review = ReviewPlan.create(
+            root=str(path),
+            recursive=recursive,
+            tag_proposals=proposals,
+            issues=issues,
+        )
+        results = apply_review_plan(review, [item.id for item in proposals])
+        succeeded = sum(result.status == "succeeded" for result in results)
+        problems += sum(result.status in {"blocked", "failed"} for result in results)
+    count = succeeded if args.apply else len(proposals)
+    action = "Updated" if args.apply else "Would update"
+    output.print(
+        f"\n[bold cyan]{path}[/bold cyan]\n"
+        f"  {action}: [green]{count}[/green] / {file_count} files; "
+        f"issues: [red]{len(issues)}[/red]"
+    )
+    for item in proposals[:4]:
+        output.print(
+            f"  [dim]{item.path}[/dim] "
+            f'{item.before.get("title", "")} → {item.after.get("title", "")}'
+        )
+    for issue in issues[:3]:
+        output.print(f'  [red]ERROR[/red] {issue["path"]}: {issue["message"]}')
+    return len(proposals), succeeded, problems, file_count
+
+
 def run(args: Namespace, output: Output) -> int:
     folders = command_folders(args, output)
     if folders is None:
         return 2
-
-    proposed = 0
-    succeeded = 0
-    problems = 0
-    total_files = 0
-    valid_folders = 0
-
+    proposed = succeeded = problems = total_files = valid_folders = 0
     for folder in folders:
-        path = Path(folder.path)
-        if not path.is_dir():
-            output.print(f"[yellow]Skipping missing folder:[/yellow] {path}")
+        result = _process_folder(folder, args, output)
+        if result is None:
             problems += 1
             continue
+        folder_proposed, folder_succeeded, folder_problems, file_count = result
         valid_folders += 1
-        recursive = folder.recursive_or(True)
-        file_count = len(scan_folder(str(path), recursive=recursive))
-        proposals, issues = plan_tag_updates(str(path), recursive=recursive)
+        proposed += folder_proposed
+        succeeded += folder_succeeded
+        problems += folder_problems
         total_files += file_count
-        proposed += len(proposals)
-        problems += len(issues)
-        results = []
-        if args.apply and proposals:
-            review = ReviewPlan.create(
-                root=str(path),
-                recursive=recursive,
-                tag_proposals=proposals,
-                issues=issues,
-            )
-            results = apply_review_plan(review, [item.id for item in proposals])
-            succeeded += sum(result.status == "succeeded" for result in results)
-            problems += sum(result.status in {"blocked", "failed"} for result in results)
-
-        count = (
-            sum(result.status == "succeeded" for result in results)
-            if args.apply
-            else len(proposals)
-        )
-        action = "Updated" if args.apply else "Would update"
-        output.print(
-            f"\n[bold cyan]{path}[/bold cyan]\n"
-            f"  {action}: [green]{count}[/green] / {file_count} files; "
-            f"issues: [red]{len(issues)}[/red]"
-        )
-        for item in proposals[:4]:
-            output.print(
-                f"  [dim]{item.path}[/dim] "
-                f'{item.before.get("title", "")} → {item.after.get("title", "")}'
-            )
-        for issue in issues[:3]:
-            output.print(f'  [red]ERROR[/red] {issue["path"]}: {issue["message"]}')
-
     action = "Updated" if args.apply else "Would update"
     changed = succeeded if args.apply else proposed
     output.print(
