@@ -20,12 +20,35 @@ dependencies = [
 [project.optional-dependencies]
 test = ["pytest>=8.0.0"]
 build = ["pyinstaller>=6.0.0"]
+dev = [
+    "pytest>=9.1.1",
+    "ruff>=0.16.1",
+]
 
 [project.scripts]
 ballad = "ballad:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["build", "release", "venv", ".venv"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "C90", "RET", "PLR", "PLW"]
+ignore = [
+    "PLR0913", # Planners legitimately accept many keyword-only controls.
+    "PLR2004", # Numeric layout values are clearer inline in Tk UI code.
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pylint]
+max-statements = 40
+max-branches = 12
 
 [tool.setuptools]
 packages = [

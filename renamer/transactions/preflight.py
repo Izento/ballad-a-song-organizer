@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import os
-from pathlib import Path
 import shutil
+from collections.abc import Iterable
+from pathlib import Path
 
 from ..cover_art import ArtworkRef, verify_artwork
 from ..naming.identity import is_placeholder_artist

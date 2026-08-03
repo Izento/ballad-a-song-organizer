@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from .cache import enrichment_cache
 from .domain.identity import RecordingIdentity
 from .naming.identity import filename_identity_hint, reconcile_online_version
-
 
 RecordingEvidence = RecordingIdentity
 

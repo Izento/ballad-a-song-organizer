@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from ...domain.metadata import ArtworkDescriptor
 from ..schema import FIELDS, MULTI_VALUE_FIELDS, pair_text, split_pair, value_list
-
 
 # ID3v2.3 text frames have no native way to store more than one value, so
 # multi-value fields (genre, writer, tag, ...) are joined into a single
@@ -141,7 +141,6 @@ def write(
     from mutagen.id3 import (
         APIC,
         ID3,
-        ID3NoHeaderError,
         TALB,
         TCOM,
         TCON,
@@ -160,6 +159,7 @@ def write(
         TRCK,
         TSRC,
         TXXX,
+        ID3NoHeaderError,
     )
 
     try:

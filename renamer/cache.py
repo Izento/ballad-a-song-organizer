@@ -13,7 +13,6 @@ from typing import Any
 
 from .runtime import app_paths
 
-
 _SCHEMA_VERSION = 1
 _LOCK = threading.RLock()
 

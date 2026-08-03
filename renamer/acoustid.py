@@ -10,7 +10,7 @@ from .fingerprint import fingerprint_file_details
 from .naming.identity import filename_identity_hint
 from .online import Provider, ProviderError, RateLimiter, RequestPolicy
 from .regular_parser import normalize_text
-from .runtime import atomic_write_json, app_paths, resolve_fpcalc
+from .runtime import app_paths, atomic_write_json, resolve_fpcalc
 
 _CACHE_PATH = str(app_paths()['cache'] / 'acoustid_cache.json')
 _cache: dict | None = None
@@ -30,7 +30,7 @@ def _load_cache() -> dict:
     with _CACHE_LOCK:
         if _cache is None:
             try:
-                with open(_CACHE_PATH, 'r', encoding='utf-8') as fh:
+                with open(_CACHE_PATH, encoding='utf-8') as fh:
                     _cache = json.load(fh)
             except (FileNotFoundError, json.JSONDecodeError):
                 _cache = {}

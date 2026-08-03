@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from renamer.review_models import ReviewPlan
@@ -14,7 +14,7 @@ def format_local_timestamp(value: str) -> str:
     try:
         timestamp = datetime.fromisoformat(value.replace("Z", "+00:00"))
         if timestamp.tzinfo is None:
-            timestamp = timestamp.replace(tzinfo=timezone.utc)
+            timestamp = timestamp.replace(tzinfo=UTC)
         local = timestamp.astimezone()
         return local.strftime("%Y-%m-%d %I:%M:%S %p %Z")
     except (TypeError, ValueError):

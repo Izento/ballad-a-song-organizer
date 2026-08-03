@@ -17,7 +17,6 @@ from ..review_models import (
 )
 from ..tag_audit import expected_tags_from_filename
 
-
 _READINESS_ISSUE_CODES = {
     IssueCode.DESTINATION_COLLISION,
     IssueCode.DESTINATION_EXISTS,

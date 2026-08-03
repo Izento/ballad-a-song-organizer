@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-
 _TRACK_NUMBER_RE = re.compile(r"^\d{1,3}(\s|[-.]|$)")
 _COUNT_KEYS = (
     "ocremix_tagged",

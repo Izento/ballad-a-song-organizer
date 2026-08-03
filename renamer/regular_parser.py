@@ -17,7 +17,6 @@ from .qualifiers import (
     split_version_qualifiers,
 )
 
-
 _FEATURE_MARKER = r"(?:feat(?:uring)?\.?|ft\.?|w/)"
 _FEATURE_BLOCK_START_RE = re.compile(
     rf"^\s*{_FEATURE_MARKER}\s+",

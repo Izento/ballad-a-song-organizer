@@ -6,8 +6,8 @@ from gui import app as gui_app
 from gui.app import SongOrganizerApp
 from renamer.domain.issues import ReviewIssue
 from renamer.review_models import (
-    FileSnapshot,
     DuplicateFinding,
+    FileSnapshot,
     RenameProposal,
     ReviewPlan,
     TagProposal,
@@ -16,10 +16,10 @@ from renamer.review_models import (
 
 def test_version_qualifier_conflict_requires_manual_review():
     issue = ReviewIssue.from_message(
-        (
+
             "Version qualifier conflicts with AcoustID metadata; "
             "review the proposed filename."
-        )
+
     )
     proposal = SimpleNamespace(requires_review=issue.requires_review)
 

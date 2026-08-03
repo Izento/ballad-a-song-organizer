@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 from ...domain.metadata import ArtworkDescriptor
 from ..schema import FIELDS, split_pair, value_list
-
 
 _FREEFORM_PREFIX = "----:com.apple.iTunes:"
 

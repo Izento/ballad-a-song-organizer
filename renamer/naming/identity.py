@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from pathlib import Path
 import re
 import unicodedata
+from dataclasses import dataclass
+from pathlib import Path
 
 from ..qualifiers import (
     has_explicit_variant,
@@ -15,7 +15,6 @@ from ..qualifiers import (
     preserve_local_versions,
 )
 from ..regular_parser import RegularName, normalize_text, parse_regular_filename
-
 
 _VERSION_BLOCK_RE = re.compile(r"[\(\[]\s*[^\)\]]+?\s*[\)\]]")
 _VERSION_CREDIT_RE = re.compile(r"\b(?:edit|mix|remix|version)\b", re.IGNORECASE)
@@ -83,7 +82,7 @@ class TrackIdentity:
         return self.normalized_artist, self.normalized_core_title
 
     @classmethod
-    def from_regular(cls, name: RegularName) -> "TrackIdentity":
+    def from_regular(cls, name: RegularName) -> TrackIdentity:
         return cls(
             artist=name.artist,
             title=name.title,

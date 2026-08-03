@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from ...domain.metadata import ArtworkDescriptor
 from ..schema import FIELDS, value_list

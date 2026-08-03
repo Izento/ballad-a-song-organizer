@@ -2,7 +2,7 @@
 
 from gui import workers
 from gui.workers import BackgroundJobs
-from renamer.review_models import ReviewPlan, RenameProposal, canonical_path
+from renamer.review_models import RenameProposal, ReviewPlan, canonical_path
 
 
 def test_organize_worker_only_analyzes_and_never_applies(tmp_path, monkeypatch):

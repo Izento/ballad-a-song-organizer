@@ -3,15 +3,15 @@
 from __future__ import annotations
 
 import hashlib
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from ..domain.metadata import ArtworkDescriptor, StagedArtwork
 from .adapters import asf, id3, mp4, vorbis
 from .legacy_filename import parse_stem, parsed_tag_values
 from .reader import read_media
 from .schema import expected_metadata, metadata_matches
-
 
 _ADAPTERS = {
     ".mp3": id3,

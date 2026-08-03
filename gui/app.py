@@ -8,27 +8,38 @@ import json
 import os
 import queue
 import subprocess
-from dataclasses import replace
 import tkinter as tk
+from dataclasses import replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from typing import Any
 
 from PIL import Image, ImageTk
 
-from renamer.media import read_front_artwork
-
-from renamer.domain.issues import ReviewIssue
-from renamer.quarantine import (
-    load_quarantine,
-    quarantine_file,
-    unquarantine_files,
+from gui.presentation import (
+    filename_validation_error as _filename_validation_error,
 )
+from gui.presentation import (
+    format_local_timestamp as _format_local_timestamp,
+)
+from gui.presentation import (
+    plan_rows,
+)
+from gui.presentation import tag_display as _tag_display  # noqa: F401
+from gui.workers import BackgroundJobs
 from renamer.apply import (
     batch_history,
     batches_requiring_recovery,
     latest_undoable_batch,
     undo_batch,
+)
+from renamer.domain.issues import ReviewIssue
+from renamer.media import read_front_artwork
+from renamer.musicbrainz import is_available as musicbrainz_available
+from renamer.quarantine import (
+    load_quarantine,
+    quarantine_file,
+    unquarantine_files,
 )
 from renamer.review_api import (
     coordinate_tag_proposals,
@@ -40,7 +51,6 @@ from renamer.review_models import (
     path_key,
     proposal_id,
 )
-from renamer.musicbrainz import is_available as musicbrainz_available
 from renamer.runtime import (
     ensure_app_dirs,
     resolve_acoustid_key,
@@ -49,21 +59,25 @@ from renamer.runtime import (
 )
 from renamer.selection import (
     action_items as _action_items,
+)
+from renamer.selection import (
     artwork_ids as _artwork_ids,
+)
+from renamer.selection import (
     expand_group_selection as _expand_group_selection,
+)
+from renamer.selection import (
     grouped_action_ids as _grouped_action_ids,
+)
+from renamer.selection import (
     is_high_confidence_action as _is_high_confidence_action,
+)
+from renamer.selection import (
     recommended_ids as _recommended_ids,
+)
+from renamer.selection import (
     requires_review as _requires_review,
 )
-from gui.workers import BackgroundJobs
-from gui.presentation import (
-    filename_validation_error as _filename_validation_error,
-    format_local_timestamp as _format_local_timestamp,
-    plan_rows,
-    tag_display as _tag_display,
-)
-
 
 GUI_TITLE = "Ballad"
 _WINDOWS_APP_ID = "Ballad.SongOrganizer"

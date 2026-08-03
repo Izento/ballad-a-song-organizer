@@ -2,8 +2,8 @@
 
 from types import SimpleNamespace
 
-from renamer.cache import EnrichmentCache
 from renamer import cover_art
+from renamer.cache import EnrichmentCache
 
 
 class _Response:

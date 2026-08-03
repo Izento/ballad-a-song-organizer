@@ -6,7 +6,6 @@ from collections.abc import Callable
 
 from ..domain.issues import ReviewIssue
 
-
 ProgressCallback = Callable[[str, int, int, str], None]
 
 

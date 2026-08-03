@@ -1,7 +1,7 @@
 # pylint: disable=import-error
 
-from renamer.cache import EnrichmentCache
 from renamer import identification
+from renamer.cache import EnrichmentCache
 
 
 def test_existing_recording_id_is_high_confidence_without_network(tmp_path):

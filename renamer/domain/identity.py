@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import Any, Mapping
+from typing import Any
 
 
 class Confidence(StrEnum):
@@ -18,7 +18,7 @@ class Confidence(StrEnum):
 _CONFIDENCE_ORDER = tuple(Confidence)
 
 
-def weakest_confidence(*values: "Confidence | str") -> Confidence:
+def weakest_confidence(*values: Confidence | str) -> Confidence:
     """Return the most conservative of several confidence signals.
 
     A downstream step succeeding cleanly doesn't make an upstream, shakier
@@ -93,7 +93,7 @@ class Evidence(Mapping[str, Any]):
         self._lookup = dict(self._items)
 
     @classmethod
-    def coerce(cls, value: "Evidence | Mapping[str, Any] | None") -> "Evidence":
+    def coerce(cls, value: Evidence | Mapping[str, Any] | None) -> Evidence:
         return value if isinstance(value, cls) else cls(value)
 
     def __getitem__(self, key: str) -> Any:
@@ -139,7 +139,7 @@ class RecordingIdentity:
         return bool(self.derived_from_recording_id and not self.exact_recording_id)
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "RecordingIdentity":
+    def from_dict(cls, value: Mapping[str, Any]) -> RecordingIdentity:
         return cls(
             artist=str(value.get("artist") or ""),
             title=str(value.get("title") or ""),

@@ -24,7 +24,6 @@ from .planners.rename import plan_renames as _plan_renames
 from .planners.tags import plan_tag_updates
 from .review_models import path_key as _path_key
 
-
 _ONLINE_EXTRACTION_WORKERS = ONLINE_EXTRACTION_WORKERS
 _proposal_identity = proposal_identity
 path_key = _path_key

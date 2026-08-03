@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
-import re
 from typing import Any
 
 from ..acoustid import cache_write_batch
@@ -42,7 +42,6 @@ from ..review_models import (
 )
 from .common import ProgressCallback, emit, issue
 from .readiness import refresh_rename_readiness
-
 
 _SAFE_DERIVATIVE_FIELDS = frozenset(
     {

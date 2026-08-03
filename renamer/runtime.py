@@ -9,7 +9,6 @@ import sys
 import tempfile
 from pathlib import Path
 
-
 APP_NAME = "SongOrganizer"
 
 

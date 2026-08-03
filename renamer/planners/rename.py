@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from ..extractor import TrackInfo, extract_track, scan_folder
 from ..formatter import build_filename

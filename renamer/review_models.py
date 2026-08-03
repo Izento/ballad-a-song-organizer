@@ -8,8 +8,7 @@ import os
 import unicodedata
 import uuid
 from dataclasses import asdict, dataclass, field, replace
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import UTC, datetime
 from typing import Any
 
 from .domain.identity import Evidence
@@ -20,7 +19,6 @@ from .domain.metadata import (
     StagedArtwork,
     artwork_to_dict,
 )
-
 
 APP_VERSION = "0.1.0"
 PLAN_SCHEMA_VERSION = 2
@@ -83,7 +81,7 @@ class FileSnapshot:
         tags: dict[str, Any] | None = None,
         artwork: dict[str, Any] | None = None,
         include_hash: bool = False,
-    ) -> "FileSnapshot":
+    ) -> FileSnapshot:
         stat = os.stat(path)
         digest = None
         if include_hash:
@@ -337,14 +335,14 @@ class ReviewPlan:
         duplicate_findings: list[DuplicateFinding] | tuple[DuplicateFinding, ...] = (),
         issues: list[dict[str, Any] | ReviewIssue]
         | tuple[dict[str, Any] | ReviewIssue, ...] = (),
-    ) -> "ReviewPlan":
+    ) -> ReviewPlan:
         plan = cls(
             batch_id=uuid.uuid4().hex,
             schema_version=PLAN_SCHEMA_VERSION,
             app_version=APP_VERSION,
             root=canonical_path(root),
             recursive=recursive,
-            created_at=datetime.now(timezone.utc).isoformat(),
+            created_at=datetime.now(UTC).isoformat(),
             rename_proposals=tuple(rename_proposals),
             tag_proposals=tuple(tag_proposals),
             duplicate_findings=tuple(duplicate_findings),
@@ -371,7 +369,7 @@ class ReviewPlan:
         )
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ReviewPlan":
+    def from_dict(cls, data: dict[str, Any]) -> ReviewPlan:
         def snapshot_from(value: dict[str, Any]) -> FileSnapshot:
             return FileSnapshot(**value)
 
@@ -443,7 +441,7 @@ class ReviewPlan:
     def with_rename_proposals(
         self,
         proposals: list[RenameProposal] | tuple[RenameProposal, ...],
-    ) -> "ReviewPlan":
+    ) -> ReviewPlan:
         """Return an equivalent plan with reviewed rename changes re-signed."""
         return self.with_proposals(proposals, self.tag_proposals)
 
@@ -451,7 +449,7 @@ class ReviewPlan:
         self,
         rename_proposals: list[RenameProposal] | tuple[RenameProposal, ...],
         tag_proposals: list[TagProposal] | tuple[TagProposal, ...],
-    ) -> "ReviewPlan":
+    ) -> ReviewPlan:
         """Return a re-signed plan with coordinated rename and tag changes."""
         updated = replace(
             self,

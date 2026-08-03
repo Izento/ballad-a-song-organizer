@@ -93,7 +93,7 @@ class ReviewIssue(Mapping[str, Any]):
         *,
         path: str = "",
         category: str = "",
-    ) -> "ReviewIssue":
+    ) -> ReviewIssue:
         code = _CATEGORY_CODES.get(category, issue_code_for_message(message))
         return cls(
             code=code,
@@ -104,7 +104,7 @@ class ReviewIssue(Mapping[str, Any]):
         )
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any]) -> "ReviewIssue":
+    def from_dict(cls, value: Mapping[str, Any]) -> ReviewIssue:
         message = str(value.get("message") or "")
         category = str(value.get("category") or "")
         raw_code = value.get("code")

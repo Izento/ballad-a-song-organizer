@@ -1,13 +1,12 @@
 # pylint: disable=import-error
 
-import json
 import hashlib
-from pathlib import Path
+import json
 import shutil
+from pathlib import Path
 
 from renamer import apply as apply_module
-from renamer.media import MediaRead
-from renamer.media import read_media
+from renamer.media import MediaRead, read_media
 from renamer.review_models import (
     ApplyResult,
     FileSnapshot,

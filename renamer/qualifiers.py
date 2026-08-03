@@ -6,7 +6,6 @@ import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 
-
 _BLOCK_RE = re.compile(r"[\[(]\s*([^\])]+?)\s*[\])]")
 _TRAILING_VIP_RE = re.compile(
     r"(?:\s*[-–—]\s*|\s+)(?P<label>v\.?\s*i\.?\s*p\.?"

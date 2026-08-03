@@ -9,14 +9,14 @@ from __future__ import annotations
 
 import hashlib
 import os
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 from .extractor import AUDIO_EXTENSIONS
 from .fingerprint import fingerprint_file
-from .naming import TrackIdentity
 from .media import read_media
+from .naming import TrackIdentity
 from .regular_parser import RegularName, normalize_text, parse_regular_stem
 from .review_models import DuplicateFinding, path_key, proposal_id
 

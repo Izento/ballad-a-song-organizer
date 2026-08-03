@@ -2,15 +2,15 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import re
 import shutil
 import time
-from datetime import datetime, timezone
+from collections.abc import Callable, Iterable
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Callable, Iterable
 
 from .domain.metadata import artwork_to_dict
 from .media import read_front_artwork, read_media
@@ -32,12 +32,13 @@ from .transactions import (
     group_transactions,
     restore_metadata_snapshot,
 )
+from .transactions.journal import TransactionJournal
 from .transactions.preflight import (
     preflight as transaction_preflight,
+)
+from .transactions.preflight import (
     selected_proposals as transaction_selected_proposals,
 )
-from .transactions.journal import TransactionJournal
-
 
 ProgressCallback = Callable[[str, int, int, ApplyResult | None], None]
 
@@ -575,7 +576,7 @@ def undo_batch(
         action.update(
             {
                 "status": "undone",
-                "undone_timestamp": datetime.now(timezone.utc).isoformat(),
+                "undone_timestamp": datetime.now(UTC).isoformat(),
             }
         )
         for stale_key in ("undo_error", "undo_error_type", "undo_error_at"):
@@ -586,7 +587,7 @@ def undo_batch(
         # actionable instead of pointing at a file with no failure reason.
         action["undo_error"] = str(exc)
         action["undo_error_type"] = type(exc).__name__
-        action["undo_error_at"] = datetime.now(timezone.utc).isoformat()
+        action["undo_error_at"] = datetime.now(UTC).isoformat()
 
     for action in reversed(data.get("actions", [])):
         action_group = str(

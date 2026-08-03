@@ -51,7 +51,7 @@ class SongTransaction:
     tag: TagProposal | None = None
     state: TransactionState = TransactionState.READY
 
-    def transition(self, state: TransactionState) -> "SongTransaction":
+    def transition(self, state: TransactionState) -> SongTransaction:
         allowed = _TRANSITIONS.get(self.state, set())
         if state not in allowed:
             raise ValueError(

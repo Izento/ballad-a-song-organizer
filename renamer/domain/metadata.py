@@ -6,7 +6,6 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-
 MetadataScalar = str | int | float | bool
 MetadataInput = Mapping[str, Any] | None
 
@@ -39,7 +38,7 @@ class CanonicalMetadata(Mapping[str, Any]):
         self._lookup = dict(items)
 
     @classmethod
-    def coerce(cls, values: "CanonicalMetadata | MetadataInput") -> "CanonicalMetadata":
+    def coerce(cls, values: CanonicalMetadata | MetadataInput) -> CanonicalMetadata:
         return values if isinstance(values, cls) else cls(values)
 
     def __getitem__(self, key: str) -> Any:
@@ -68,7 +67,7 @@ class CanonicalMetadata(Mapping[str, Any]):
             for key, value in self._items
         }
 
-    def merged(self, values: MetadataInput) -> "CanonicalMetadata":
+    def merged(self, values: MetadataInput) -> CanonicalMetadata:
         merged = self.to_dict()
         merged.update(values or {})
         return CanonicalMetadata(merged)
@@ -83,7 +82,7 @@ class ArtworkDescriptor(Mapping[str, Any]):
     mime_type: str
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any] | None) -> "ArtworkDescriptor | None":
+    def from_dict(cls, value: Mapping[str, Any] | None) -> ArtworkDescriptor | None:
         if not value:
             return None
         if value.get("path"):
@@ -123,7 +122,7 @@ class StagedArtwork(ArtworkDescriptor):
     source_url: str = ""
 
     @classmethod
-    def from_dict(cls, value: Mapping[str, Any] | None) -> "StagedArtwork | None":
+    def from_dict(cls, value: Mapping[str, Any] | None) -> StagedArtwork | None:
         if not value:
             return None
         return cls(

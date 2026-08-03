@@ -8,7 +8,6 @@ from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from ..extractor import TrackInfo, extract_track
 from .common import ProgressCallback, emit
 
-
 ONLINE_EXTRACTION_WORKERS = 4
 ExtractTrack = Callable[..., TrackInfo]
 

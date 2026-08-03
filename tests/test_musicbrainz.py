@@ -1,8 +1,8 @@
 # pylint: disable=import-error,protected-access
 
-from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest

@@ -11,7 +11,6 @@ from ..regular_parser import (
     strip_audio_extensions,
 )
 
-
 _OCREMIX_RE = re.compile(r"\[OC\s*Re[Mm]ix\]", re.IGNORECASE)
 _OCREMIX_LABEL_RE = re.compile(r"\bOC\s*Re[Mm]ix\b", re.IGNORECASE)
 _VERSION_LABEL_RE = re.compile(

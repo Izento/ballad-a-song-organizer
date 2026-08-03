@@ -1,13 +1,12 @@
 # pylint: disable=import-error
 
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import pytest
 
 from renamer.media import read_media
 from renamer.tag_writer import write_tags_to_file
-
 
 FIXTURES = Path(__file__).parent / "fixtures"
 FORMATS = ("mp3", "flac", "ogg", "m4a", "wma")
