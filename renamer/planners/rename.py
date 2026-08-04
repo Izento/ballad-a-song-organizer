@@ -17,7 +17,7 @@ from ..review_models import (
     proposal_id,
 )
 from ..track_extraction import TrackInfo, extract_track, scan_folder
-from ..track_identity import filename_identity_hint
+from ..track_identity import filename_identity_hint, is_placeholder_artist
 from .parallel_extraction import extract_tracks
 from .progress import ProgressCallback, emit, issue
 from .readiness import refresh_rename_readiness
@@ -86,6 +86,14 @@ def _resolve_track(
         return None, online_conflict, track.skip_reason
     if not any((track.artist, track.title, track.game)):
         return None, online_conflict, "No extractable identity"
+    if not track.is_ocremix and (not track.artist or is_placeholder_artist(track.artist)):
+        artist = track.artist or "missing artist"
+        return (
+            None,
+            online_conflict,
+            f'Placeholder identity: "{artist}" is not a usable artist identity. '
+            "Skipped filename change.",
+        )
     return track, online_conflict, None
 
 
@@ -176,9 +184,7 @@ def _plan_extracted_track(
             enrich=enrich,
         )
         if track_error:
-            category = (
-                "identity-conflict" if "automatic rename blocked" in track_error else "rename"
-            )
+            category = _issue_category_for_track_error(track_error)
             return None, issue(canonical_path(path), category, track_error)
         return _proposal_for_track(
             path,
@@ -188,6 +194,12 @@ def _plan_extracted_track(
         ), None
     except (OSError, ValueError) as exc:
         return None, issue(canonical_path(path), "rename", str(exc))
+
+
+def _issue_category_for_track_error(track_error: str) -> str:
+    if track_error.startswith("Placeholder identity:"):
+        return "placeholder-identity"
+    return "identity-conflict" if "automatic rename blocked" in track_error else "rename"
 
 
 # Preserve positional arguments supported by this public planner API.

@@ -38,14 +38,16 @@ class ContextMenuMixin:
         return menu
 
     def _selected_context_proposals(self, tree_name: str, tree, row: str) -> list:
+        if tree_name != "changes":
+            return []
         rows = list(tree.selection()) if row in tree.selection() else [row]
         proposals, seen = [], set()
         for selected_row in rows:
-            item_id = self.session.row_ids.get((tree_name, selected_row), "")
-            proposal = self.session.proposal_for_id(item_id) if item_id not in seen else None
-            if proposal is not None:
-                seen.add(item_id)
-                proposals.append(proposal)
+            group_id = self.session.row_group_ids.get((tree_name, selected_row), "")
+            if group_id in seen:
+                continue
+            seen.add(group_id)
+            proposals.extend(self.session.proposals_for_group(group_id))
         return proposals
 
     def _add_proposal_context_commands(self, menu, tree_name: str, proposals: list) -> None:
@@ -59,18 +61,21 @@ class ContextMenuMixin:
         )
         menu.add_command(label=label, command=lambda: self._quarantine_proposals(proposals))
         menu.add_command(label="Quarantine manager…", command=self._show_quarantine_manager)
-        proposal = proposals[0]
-        if tree_name == "tags" and proposal.evidence:
+        if tree_name == "changes" and any(proposal.evidence for proposal in proposals):
             menu.add_separator()
             menu.add_command(
                 label="Show metadata evidence",
-                command=lambda: self._show_metadata_evidence(proposal),
+                command=lambda: self._show_metadata_evidence(proposals),
             )
 
-    def _show_metadata_evidence(self, proposal) -> None:
+    def _show_metadata_evidence(self, proposals) -> None:
         messagebox.showinfo(
             "Metadata evidence",
-            json.dumps(proposal.evidence.to_dict(), indent=2, ensure_ascii=False),
+            json.dumps(
+                [proposal.evidence.to_dict() for proposal in proposals if proposal.evidence],
+                indent=2,
+                ensure_ascii=False,
+            ),
         )
 
     def _open_in_file_explorer(self, path: str) -> None:

@@ -41,7 +41,7 @@ _INSTRUMENTAL = "instrumental"
 _INSTRUMENTAL_ABBREVIATIONS = frozenset(
     {"inst", "instr", "instrum", "instrume", "instrumen", "instrument"}
 )
-_TRAILING_BLOCK_RE = re.compile(r"\s*\(([^()]*)\)\s*$")
+_TRAILING_BLOCK_RE = re.compile(r"\s*(?:\(([^()]*)\)|\[([^\[\]]*)\])\s*$")
 
 
 @dataclass(frozen=True)
@@ -225,7 +225,8 @@ def split_version_qualifiers(title: str) -> tuple[str, tuple[str, ...]]:
     remaining = _clean(normalize_instrumental_spelling(title))
     qualifiers: list[str] = []
     while match := _TRAILING_BLOCK_RE.search(remaining):
-        label, kind = _canonical_label(match.group(1))
+        value = next(group for group in match.groups() if group is not None)
+        label, kind = _canonical_label(value)
         if kind not in {
             "instrumental",
             "a_cappella",
@@ -253,15 +254,20 @@ def remove_safe_noise(value: str) -> str:
 
 def preserve_local_versions(local_title: str, online_title: str) -> str:
     """Append explicit local recording variants absent from online metadata."""
-    retained = [item.value for item in parse_qualifiers(local_title) if item.is_recording_identity]
-    if has_instrumental_qualifier(local_title) and "Instrumental" not in retained:
-        retained.append("Instrumental")
+    retained = [item for item in parse_qualifiers(local_title) if item.is_recording_identity]
+    if has_instrumental_qualifier(local_title) and not any(
+        item.kind == "instrumental" for item in retained
+    ):
+        retained.append(Qualifier("Instrumental", "instrumental"))
     known_title = online_title
+    _title, trailing_labels = split_version_qualifiers(known_title)
+    trailing_kinds = {_canonical_label(label)[1] for label in trailing_labels}
     missing = [
-        value
-        for value in retained
+        item.value
+        for item in retained
+        if not (item.kind == "remix" and "remix" in trailing_kinds)
         if not has_matching_qualifier(
-            f"Track ({value})",
+            f"Track ({item.value})",
             known_title,
         )
     ]

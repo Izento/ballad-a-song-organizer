@@ -21,7 +21,7 @@ class QuarantineDialogMixin:
 
     def _build_quarantine_window(self):
         window = tk.Toplevel(self.root)
-        window.title("Ballad quarantine")
+        window.title("Manage quarantine")
         window.geometry("780x380")
         frame = ttk.Frame(window, padding=10)
         frame.pack(fill=tk.BOTH, expand=True)
@@ -70,19 +70,19 @@ class QuarantineDialogMixin:
         bottom.pack(fill=tk.X)
         ttk.Button(
             bottom,
-            text="Clear selected",
-            command=lambda: self._clear_selected_quarantine(tree),
+            text="Restore selected",
+            command=lambda: self._restore_selected_quarantine(tree),
         ).pack(side=tk.LEFT)
         ttk.Button(bottom, text="Close", command=window.destroy).pack(side=tk.RIGHT)
 
-    def _clear_selected_quarantine(self, tree) -> None:
+    def _restore_selected_quarantine(self, tree) -> None:
         selected = tree.selection()
         if not selected:
             return
         removed = unquarantine_files(list(selected))
         if removed:
             self._populate_quarantine_tree(tree)
-            self.status_var.set(f"Removed {removed} file(s) from quarantine.")
+            self.status_var.set(f"Restored {removed} file(s) from quarantine.")
 
 
 __all__ = ["QuarantineDialogMixin"]

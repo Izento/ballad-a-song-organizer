@@ -195,14 +195,15 @@ class SongOrganizerApp(
         row = ttk.Frame(library)
         row.pack(fill=tk.X)
         ttk.Label(row, text="Music folder:").pack(side=tk.LEFT)
-        ttk.Entry(row, textvariable=self.folder_var).pack(
-            side=tk.LEFT, fill=tk.X, expand=True, padx=(8, 5)
-        )
+        ttk.Entry(row, textvariable=self.folder_var, width=32).pack(side=tk.LEFT, padx=(8, 5))
         ttk.Button(row, text="Browse…", command=self._browse).pack(side=tk.LEFT)
+        self._build_primary_button(row)
         ttk.Checkbutton(row, text="Include subfolders", variable=self.recursive_var).pack(
             side=tk.LEFT, padx=(10, 0)
         )
-        ttk.Label(library, textvariable=self.capability_var).pack(anchor=tk.W, pady=(6, 0))
+        self._build_action_controls(library)
+        ttk.Label(library, textvariable=self.capability_var).pack(anchor=tk.W, pady=(8, 0))
+        ttk.Label(library, textvariable=self.status_var).pack(anchor=tk.W, pady=(3, 0))
 
     def _build_options_bar(self) -> None:
         options = ttk.Labelframe(self.root, text="Identification & duplicate detection", padding=10)
@@ -283,9 +284,8 @@ class SongOrganizerApp(
         self.notebook.grid(row=0, column=0, sticky=tk.NSEW)
         self.trees, self.tabs = {}, {}
         for key, title in (
-            ("renames", "Filename changes"),
-            ("tags", "Metadata changes"),
-            ("duplicates", "Duplicate findings (read-only)"),
+            ("changes", "Planned changes"),
+            ("duplicates", "Duplicate findings"),
             ("errors", "Skipped / errors"),
         ):
             frame = ttk.Frame(self.notebook, padding=6)
@@ -297,18 +297,16 @@ class SongOrganizerApp(
     def _build_bottom_bar(self) -> None:
         bottom = ttk.Frame(self.root, padding=(10, 0, 10, 10))
         bottom.pack(fill=tk.X)
-        bottom.columnconfigure(1, weight=1)
         self._build_selection_controls(bottom)
-        ttk.Label(bottom, textvariable=self.status_var).grid(row=0, column=1, sticky=tk.EW, padx=12)
-        self._build_action_controls(bottom)
 
     def _build_selection_controls(self, parent) -> None:
-        controls = ttk.Frame(parent)
-        controls.grid(row=0, column=0, sticky=tk.W)
+        controls = ttk.Labelframe(parent, text="Change selection", padding=(6, 3))
+        controls.pack(anchor=tk.W)
         for text, command in (
             ("Select recommended", self._select_recommended),
             ("Select all ready", self._select_all),
             ("Select missing artwork", self._select_artwork),
+            ("Clear selection", self._clear_selection),
         ):
             ttk.Button(controls, text=text, command=command).pack(side=tk.LEFT, padx=(8, 0))
         self.edit_button = ttk.Button(
@@ -318,22 +316,42 @@ class SongOrganizerApp(
 
     def _build_action_controls(self, parent) -> None:
         actions = ttk.Frame(parent)
-        actions.grid(row=0, column=2, sticky=tk.E)
-        self.cancel_button = ttk.Button(actions, text="Cancel", command=self._cancel)
-        self.history_button = ttk.Button(actions, text="History", command=self._show_history)
+        actions.pack(fill=tk.X, pady=(8, 0))
+        self._build_history_controls(actions)
+        self._build_review_actions(actions)
+        self._update_duplicate_remove_button()
+
+    def _build_history_controls(self, parent) -> None:
+        history = ttk.Frame(parent)
+        history.pack(anchor=tk.W)
+        self.cancel_button = ttk.Button(history, text="Cancel", command=self._cancel)
+        self.history_button = ttk.Button(history, text="History", command=self._show_history)
+        self.undo_button = ttk.Button(history, text="Undo latest", command=self._undo_latest)
+        ttk.Label(history, text="History & recovery:").pack(side=tk.LEFT)
+        for button in (self.cancel_button, self.history_button, self.undo_button):
+            button.pack(side=tk.LEFT, padx=(8, 0))
+
+    def _build_review_actions(self, parent) -> None:
+        review = ttk.Frame(parent)
+        review.pack(anchor=tk.W, pady=(4, 0))
         self.quarantine_button = ttk.Button(
-            actions, text="Quarantine", command=self._handle_quarantine_button_click
+            review, text="Quarantine selected", command=self._handle_quarantine_button_click
         )
-        self.undo_button = ttk.Button(actions, text="Undo latest", command=self._undo_latest)
+        self.manage_quarantine_button = ttk.Button(
+            review, text="Manage quarantine…", command=self._show_quarantine_manager
+        )
+        self.remove_duplicates_button = ttk.Button(
+            review,
+            text="Move duplicates to Recycle Bin",
+            command=self._remove_selected_duplicates,
+        )
+        ttk.Label(review, text="Review actions:").pack(side=tk.LEFT)
         for button in (
-            self.cancel_button,
-            self.history_button,
             self.quarantine_button,
-            self.undo_button,
+            self.manage_quarantine_button,
+            self.remove_duplicates_button,
         ):
             button.pack(side=tk.LEFT, padx=(8, 0))
-        ttk.Separator(actions, orient=tk.VERTICAL).pack(side=tk.LEFT, fill=tk.Y, padx=10)
-        self._build_primary_button(actions)
 
     def _build_primary_button(self, parent) -> None:
         self.primary_button = tk.Button(
@@ -351,7 +369,7 @@ class SongOrganizerApp(
             padx=14,
             pady=3,
         )
-        self.primary_button.pack(side=tk.LEFT)
+        self.primary_button.pack(side=tk.LEFT, padx=(8, 0))
         self._update_primary_button()
 
     def _sync_fingerprint_availability(self, *_args, busy: bool | None = None) -> None:
@@ -374,6 +392,8 @@ class SongOrganizerApp(
             self.edit_button,
             self.history_button,
             self.quarantine_button,
+            self.manage_quarantine_button,
+            self.remove_duplicates_button,
             self.undo_button,
         ):
             widget.configure(state=state)
@@ -384,6 +404,7 @@ class SongOrganizerApp(
             self.status_var.set("Working…")
         else:
             self._update_primary_button()
+            self._update_duplicate_remove_button()
 
     def _update_primary_button(self) -> None:
         if not hasattr(self, "primary_button"):

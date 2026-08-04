@@ -1,6 +1,6 @@
 """Visual constants and row styling helpers for the desktop interface."""
 
-_FIXED_TREE_COLUMNS = {"selected", "action", "confidence"}
+_FIXED_TREE_COLUMNS = {"selected", "action", "confidence", "status"}
 _TREE_STYLE = "Ballad.Treeview"
 _PRIMARY_BUTTON_BG = "#238636"
 _PRIMARY_BUTTON_ACTIVE_BG = "#2ea043"
@@ -25,6 +25,8 @@ _CONFIDENCE_ROW_STYLES = {
     "low": ("#f8d7da", "#842029"),
     "review": ("#f8d7da", "#842029"),
     "error": ("#f8d7da", "#842029"),
+    "blocked": ("#f8d7da", "#842029"),
+    "mixed": ("#fff3cd", "#664d03"),
     "medium": ("#fff3cd", "#664d03"),
     "warning": ("#fff3cd", "#664d03"),
 }

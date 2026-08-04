@@ -16,6 +16,17 @@ from gui.presentation import confidence_color, metadata_differences, proposal_ev
 from renamer.media import read_front_artwork
 
 
+def _display_value(value: object) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) or "(none)"
+    return str(value or "(none)")
+
+
+def _short_identifier(value: object) -> str:
+    text = str(value)
+    return text if len(text) <= 16 else f"{text[:12]}…"
+
+
 class ReviewDetailsMixin:
     """Show one proposal's metadata, evidence, and cover art."""
 
@@ -24,6 +35,14 @@ class ReviewDetailsMixin:
         if not tree or not tree.selection():
             return
         row = tree.selection()[0]
+        if tree_name == "changes":
+            group_id = self.session.row_group_ids.get((tree_name, row))
+            if group_id:
+                self._update_group_review_details(group_id)
+            return
+        if tree_name == "duplicates":
+            self._update_duplicate_review_details(row)
+            return
         item_id = self.session.row_ids.get((tree_name, row))
         proposal = self.session.proposal_for_id(item_id) if item_id else None
         if proposal is not None:
@@ -52,11 +71,85 @@ class ReviewDetailsMixin:
             return
         container = ttk.Frame(self.details_content, padding=4)
         container.pack(fill=tk.BOTH, expand=True)
-        file_path = self._render_details_summary(container, proposal)
-        self._render_details_warnings(container, proposal)
-        self._render_metadata_proposal(container, proposal)
-        self._render_provider_evidence(container, proposal)
-        self._render_artwork_inspection(container, proposal, file_path)
+        self._render_component_details(container, proposal)
+
+    def _update_group_review_details(self, group_id: str) -> None:
+        proposals = self.session.proposals_for_group(group_id)
+        self._clear_review_details()
+        if not proposals:
+            self._show_review_details_prompt()
+            return
+        container = ttk.Frame(self.details_content, padding=4)
+        container.pack(fill=tk.BOTH, expand=True)
+        self._render_group_summary(container, proposals)
+        self._render_group_selection(container, proposals)
+        for proposal in proposals:
+            self._render_component_details(container, proposal)
+
+    def _render_group_summary(self, container, proposals) -> None:
+        path = getattr(proposals[0], "path", None) or getattr(proposals[0], "old_path", "")
+        box = ttk.Labelframe(container, text="Reviewing", padding=6)
+        box.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(box, text="Selected file", font=("TkDefaultFont", 9, "bold")).pack(anchor=tk.W)
+        ttk.Label(box, text=Path(path).name or "Unknown file", wraplength=310).pack(anchor=tk.W)
+
+    def _render_group_selection(self, container, proposals) -> None:
+        box = ttk.Labelframe(container, text="Apply these changes", padding=6)
+        box.pack(fill=tk.X, pady=(0, 8))
+        self._component_vars = []
+        for proposal in proposals:
+            label = "Apply filename rename" if hasattr(proposal, "old_path") else "Apply metadata"
+            if getattr(proposal, "artwork_after", None) is not None:
+                label = "Apply metadata and cover art"
+            variable = tk.BooleanVar(value=proposal.id in self.session.selected_ids)
+            self._component_vars.append(variable)
+            state = tk.DISABLED if not proposal.apply_eligible else tk.NORMAL
+            ttk.Checkbutton(
+                box,
+                text=label,
+                variable=variable,
+                state=state,
+                command=lambda item_id=proposal.id, value=variable: (
+                    self._toggle_component_selection(item_id, value.get())
+                ),
+            ).pack(anchor=tk.W)
+            if not proposal.apply_eligible:
+                for issue in proposal.review_issues:
+                    self._add_issue_label(box, issue)
+
+    def _render_component_details(self, container, proposal) -> None:
+        is_rename = hasattr(proposal, "old_path") and hasattr(proposal, "new_path")
+        label = "Filename change" if is_rename else "Metadata updates"
+        box = ttk.Labelframe(container, text=label, padding=6)
+        box.pack(fill=tk.X, pady=(0, 8))
+        file_path = self._render_details_summary(box, proposal)
+        self._render_details_warnings(box, proposal)
+        if is_rename:
+            self._add_filename_row(box, proposal)
+        else:
+            self._render_metadata_proposal(box, proposal)
+        self._render_provider_evidence(box, proposal)
+        self._render_artwork_inspection(box, proposal, file_path)
+
+    def _update_duplicate_review_details(self, row: str) -> None:
+        target = self.session.duplicate_row_ids.get(("duplicates", row))
+        plan = self.session.plan
+        finding = (
+            next((item for item in plan.duplicate_findings if item.id == target[0]), None)
+            if plan is not None and target
+            else None
+        )
+        self._clear_review_details()
+        if finding is None:
+            self._show_review_details_prompt()
+            return
+        box = ttk.Labelframe(self.details_content, text="Duplicate finding", padding=6)
+        box.pack(fill=tk.X, padx=4, pady=4)
+        ttk.Label(box, text=finding.recommendation, wraplength=320).pack(anchor=tk.W)
+        ttk.Label(
+            box,
+            text=f"Confidence: {finding.confidence}\nFiles in group: {len(finding.paths)}",
+        ).pack(anchor=tk.W, pady=(6, 0))
 
     def _clear_review_details(self) -> None:
         for child in self.details_content.winfo_children():
@@ -79,8 +172,12 @@ class ReviewDetailsMixin:
         file_path = getattr(proposal, "path", None) or getattr(proposal, "old_path", None) or ""
         ttk.Label(
             container,
+            text="Source file",
+            font=("TkDefaultFont", 9, "bold"),
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            container,
             text=Path(file_path).name or "Unknown file",
-            font=("TkDefaultFont", 10, "bold"),
             wraplength=320,
         ).pack(anchor=tk.W, pady=(0, 2))
         confidence = str(getattr(proposal, "confidence", "medium")).upper()
@@ -127,45 +224,64 @@ class ReviewDetailsMixin:
         ).pack(anchor=tk.W, pady=1)
 
     def _render_metadata_proposal(self, container, proposal) -> None:
-        box = ttk.Labelframe(container, text="Metadata Proposal", padding=6)
-        box.pack(fill=tk.X, pady=(0, 8))
+        ttk.Label(container, text="Set metadata", font=("TkDefaultFont", 9, "bold")).pack(
+            anchor=tk.W, pady=(0, 2)
+        )
+        changed = False
         for label, before, after in metadata_differences(proposal):
-            if before or after:
-                self._add_metadata_row(box, label, before, after)
-        if hasattr(proposal, "old_path") and hasattr(proposal, "new_path"):
-            self._add_filename_row(box, proposal)
+            if before != after:
+                self._add_metadata_row(container, label, before, after)
+                changed = True
+        if getattr(proposal, "artwork_after", None) is not None:
+            ttk.Label(container, text="Cover art: Add or replace embedded cover").pack(anchor=tk.W)
+            changed = True
+        if not changed:
+            ttk.Label(container, text="No visible tag fields change.", foreground="gray").pack(
+                anchor=tk.W
+            )
 
     def _add_metadata_row(self, parent, label: str, before: object, after: object) -> None:
         row = ttk.Frame(parent)
-        row.pack(fill=tk.X, pady=2)
-        ttk.Label(row, text=f"{label}:", font=("TkDefaultFont", 9, "bold"), width=8).pack(
-            side=tk.LEFT
-        )
-        value = f"{before or '(none)'}  ➔  {after or '(none)'}"
+        row.pack(fill=tk.X, pady=(2, 4))
+        ttk.Label(row, text=label, font=("TkDefaultFont", 9, "bold")).pack(anchor=tk.W)
         ttk.Label(
             row,
-            text=value if before != after else f"{after or '(unchanged)'}",
-            wraplength=230,
+            text=f"Current: {_display_value(before)}",
+            foreground="gray",
+            wraplength=300,
             justify=tk.LEFT,
-        ).pack(side=tk.LEFT)
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            row,
+            text=f"Set to: {_display_value(after)}",
+            font=("TkDefaultFont", 9, "bold"),
+            wraplength=300,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
 
     def _add_filename_row(self, parent, proposal) -> None:
-        row = ttk.Frame(parent)
-        row.pack(fill=tk.X, pady=2)
-        ttk.Label(row, text="Filename:", font=("TkDefaultFont", 9, "bold"), width=8).pack(
-            side=tk.LEFT
-        )
         old_name, new_name = Path(proposal.old_path).name, Path(proposal.new_path).name
+        ttk.Label(parent, text="Rename to", font=("TkDefaultFont", 9, "bold")).pack(
+            anchor=tk.W, pady=(0, 2)
+        )
         ttk.Label(
-            row,
-            text=f"{old_name}\n➔ {new_name}" if old_name != new_name else new_name,
-            wraplength=230,
+            parent,
+            text=f"Current: {old_name}",
+            foreground="gray",
+            wraplength=300,
             justify=tk.LEFT,
-        ).pack(side=tk.LEFT)
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            parent,
+            text=f"New filename: {new_name}",
+            font=("TkDefaultFont", 9, "bold"),
+            wraplength=300,
+            justify=tk.LEFT,
+        ).pack(anchor=tk.W)
 
     def _render_provider_evidence(self, container, proposal) -> None:
         identification, musicbrainz = proposal_evidence(proposal)
-        box = ttk.Labelframe(container, text="Provider Evidence", padding=6)
+        box = ttk.Labelframe(container, text="Verification", padding=6)
         box.pack(fill=tk.X, pady=(0, 8))
         if not (identification or musicbrainz):
             ttk.Label(box, text="No online provider evidence attached.", foreground="gray").pack(
@@ -187,11 +303,14 @@ class ReviewDetailsMixin:
         ).pack(anchor=tk.W)
 
     def _render_musicbrainz_evidence(self, parent, evidence: dict) -> None:
-        for label, key in (("MB Recording ID", "recording_id"), ("MB Release ID", "release_id")):
+        for label, key in (
+            ("MusicBrainz recording", "recording_id"),
+            ("MusicBrainz release", "release_id"),
+        ):
             if evidence.get(key):
                 ttk.Label(
                     parent,
-                    text=f"{label}:\n{evidence[key]}",
+                    text=f"{label}: {_short_identifier(evidence[key])}",
                     font=("TkDefaultFont", 8),
                 ).pack(anchor=tk.W, pady=(2, 0))
         for label, key in (("Release", "release"), ("Release Date", "date")):

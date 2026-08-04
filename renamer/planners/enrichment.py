@@ -22,6 +22,7 @@ from ..filename_parser import (
 from ..genre_aliases import normalize_genre_list
 from ..identification import identify
 from ..media import read_media
+from ..media.schema import expected_metadata, metadata_matches
 from ..musicbrainz import enrich_recording
 from ..qualifiers import preserve_local_versions, remove_safe_noise
 from ..quarantine import is_quarantined
@@ -250,7 +251,10 @@ def _tag_proposal(
     warnings: tuple[str, ...],
     confidence: str,
 ) -> TagProposal | None:
-    if after == media.tags and artwork_after is None:
+    if (
+        metadata_matches(expected_metadata(after), expected_metadata(media.tags))
+        and artwork_after is None
+    ):
         return None
     return TagProposal(
         id=proposal_id(
@@ -302,6 +306,8 @@ def _rename_proposal(
     # list, which would double up on the same name.
     artist, artist_features = split_feat(artist)
     title, title_features = split_feat(title)
+    if not artist or is_placeholder_artist(artist):
+        return None
     feat_artists = _merge_features(artist_features, title_features)
     track = TrackInfo(
         path=path,
@@ -693,6 +699,22 @@ def _missing_enrichment_plan(path: str) -> EnrichedFilePlan:
     )
 
 
+def _placeholder_identity_plan(path: str, artist: str) -> EnrichedFilePlan:
+    message = (
+        f'Placeholder identity: "{artist}" is not a usable artist identity. '
+        "Skipped filename and metadata changes."
+    )
+    return EnrichedFilePlan(
+        issues=(
+            ReviewIssue.from_message(
+                message,
+                path=canonical_path(path),
+                category="placeholder-identity",
+            ),
+        )
+    )
+
+
 def _merged_after(media, values: dict) -> dict:
     """Merge enriched values, then normalize the resulting genre field."""
     after = {**media.tags, **values}
@@ -748,6 +770,9 @@ def _plan_identified_file(
         return _missing_enrichment_plan(path)
     values = _enriched_values(path, media, evidence, enriched)
     after = _merged_after(media, values)
+    artist = str(after.get("artist") or "")
+    if is_placeholder_artist(artist):
+        return _placeholder_identity_plan(path, artist)
     artwork_after = _planned_artwork(
         media,
         evidence,

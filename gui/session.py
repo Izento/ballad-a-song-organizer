@@ -18,7 +18,10 @@ class ReviewSession:
     applied_group_ids: set[str] = field(default_factory=set)
     recovery_overrides: set[str] = field(default_factory=set)
     row_ids: dict[tuple[str, str], str] = field(default_factory=dict)
+    row_group_ids: dict[tuple[str, str], str] = field(default_factory=dict)
     row_paths: dict[tuple[str, str], str] = field(default_factory=dict)
+    duplicate_row_ids: dict[tuple[str, str], tuple[str, str]] = field(default_factory=dict)
+    duplicate_selected_paths: dict[str, set[str]] = field(default_factory=dict)
     selection_anchors: dict[str, str] = field(default_factory=dict)
     sort_state: dict[tuple[str, str], bool] = field(default_factory=dict)
     last_run_checked_duplicates: bool = True
@@ -35,6 +38,12 @@ class ReviewSession:
     def group_was_applied(self, proposal: Any) -> bool:
         """Return whether this proposal's song changed in this run."""
         return proposal.decision_group_id in self.applied_group_ids
+
+    def proposals_for_group(self, group_id: str) -> tuple[Any, ...]:
+        """Return all filename and metadata proposals for one song."""
+        if self.plan is None:
+            return ()
+        return tuple(item for item in action_items(self.plan) if item.decision_group_id == group_id)
 
     def selection_group_count(self) -> int:
         """Return selected decision groups rather than individual actions."""

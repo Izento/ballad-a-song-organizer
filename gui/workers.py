@@ -6,6 +6,7 @@ import queue
 import threading
 
 from renamer.apply import apply_review_plan, undo_batch
+from renamer.recycle_bin import apply_selected_duplicates
 from renamer.review_service import analyze_folder
 
 
@@ -85,6 +86,17 @@ class BackgroundJobs:
 
     def undo(self, batch_id: str) -> None:
         self._start(lambda: undo_batch(batch_id), "undo-complete")
+
+    def remove_duplicates(self, targets) -> None:
+        def operation():
+            results = []
+            for finding, paths in targets:
+                if self.cancel_event.is_set():
+                    break
+                results.extend(apply_selected_duplicates(finding, paths))
+            return results
+
+        self._start(operation, "duplicate-remove-complete")
 
 
 __all__ = ["BackgroundJobs"]

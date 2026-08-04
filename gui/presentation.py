@@ -87,27 +87,18 @@ class DisplayRow:
     proposed: str = ""
     confidence: str = ""
     is_change: bool = False
-
-
-def _action_label(item, default: str) -> str:
-    if getattr(item, "artwork_after", None) is not None:
-        return "Review cover art" if requires_review(item) else "Cover art + metadata"
-    return "Needs review" if requires_review(item) else default
-
-
-def _tag_proposed_display(item) -> str:
-    values = tag_display(item.after)
-    if item.artwork_after is None:
-        return values
-    album = str(item.after.get("album") or "").strip()
-    artwork = f"Embed cover art: {album}" if album else "Embed cover art"
-    return " / ".join(value for value in (values, artwork) if value)
+    filename: str = ""
+    metadata: str = ""
+    status: str = ""
+    group_id: str = ""
+    proposal_ids: tuple[str, ...] = ()
+    duplicate_id: str = ""
+    is_duplicate: bool = False
 
 
 def plan_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
     rows = []
-    rows.extend(_rename_rows(plan))
-    rows.extend(_tag_rows(plan))
+    rows.extend(_change_rows(plan))
     for item in plan.duplicate_findings:
         paths = item.paths or ("",)
         for index, path in enumerate(paths, start=1):
@@ -119,6 +110,8 @@ def plan_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
                     path=path,
                     current=item.recommendation,
                     confidence=item.confidence,
+                    duplicate_id=item.id,
+                    is_duplicate=True,
                 )
             )
     for index, item in enumerate(plan.issues):
@@ -135,39 +128,65 @@ def plan_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
     return tuple(rows)
 
 
-def _rename_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
-    return tuple(
-        DisplayRow(
-            tree="renames",
-            item_id=item.id,
-            action=_action_label(item, "Rename"),
-            path=item.old_path,
-            current=str(item.current_values.get("filename", "")),
-            proposed=str(item.proposed_values.get("filename", "")),
-            confidence="review" if requires_review(item) else item.confidence,
-            is_change=True,
-        )
-        for item in plan.rename_proposals
+def _change_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
+    grouped: dict[str, list] = {}
+    for item in (*plan.rename_proposals, *plan.tag_proposals):
+        grouped.setdefault(item.decision_group_id, []).append(item)
+    return tuple(_change_row(items) for items in grouped.values())
+
+
+def _change_row(items: list) -> DisplayRow:
+    rename = next((item for item in items if hasattr(item, "old_path")), None)
+    tag = next((item for item in items if hasattr(item, "before")), None)
+    path = rename.old_path if rename is not None else tag.path
+    statuses = tuple(dict.fromkeys(_proposal_status(item) for item in items))
+    status = statuses[0] if len(statuses) == 1 else "mixed"
+    return DisplayRow(
+        tree="changes",
+        item_id=items[0].decision_group_id,
+        action="Planned changes",
+        path=path,
+        confidence=status,
+        is_change=True,
+        filename=_filename_change(rename),
+        metadata=_metadata_change(tag),
+        status=status,
+        group_id=items[0].decision_group_id,
+        proposal_ids=tuple(item.id for item in items),
     )
 
 
-def _tag_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
-    return tuple(
-        DisplayRow(
-            tree="tags",
-            item_id=item.id,
-            action=_action_label(
-                item,
-                "Metadata enrichment" if item.evidence.get("musicbrainz") else "Tag repair",
-            ),
-            path=item.path,
-            current=tag_display(item.before),
-            proposed=_tag_proposed_display(item),
-            confidence="review" if requires_review(item) else item.confidence,
-            is_change=True,
-        )
-        for item in plan.tag_proposals
-    )
+def _proposal_status(item) -> str:
+    if not item.apply_eligible:
+        return "blocked"
+    if requires_review(item):
+        return "review"
+    return "ready"
+
+
+def _filename_change(item) -> str:
+    if item is None:
+        return "—"
+    return Path(item.new_path).name
+
+
+def _metadata_change(item) -> str:
+    if item is None:
+        return "—"
+    changes = [
+        f"{label}: {_display_metadata_value(after)}"
+        for label, before, after in metadata_differences(item)
+        if before != after
+    ]
+    if item.artwork_after is not None:
+        changes.append("Cover art")
+    return " · ".join(changes) or "Metadata refresh"
+
+
+def _display_metadata_value(value: object) -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value)
+    return str(value or "(none)")
 
 
 def filename_validation_error(

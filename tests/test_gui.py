@@ -2,12 +2,13 @@
 
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
 
 from gui import workers
 from gui.presentation import format_local_timestamp
 from gui.workers import BackgroundJobs
 from renamer import apply as apply_module
-from renamer.review_models import RenameProposal, ReviewPlan, canonical_path
+from renamer.review_models import DuplicateFinding, RenameProposal, ReviewPlan, canonical_path
 from renamer.review_service import analyze_folder
 
 
@@ -128,6 +129,29 @@ def test_worker_cancel_uses_current_operation_token(tmp_path, monkeypatch):
 
     assert observed[0].is_set()
     assert jobs.events.get_nowait()[0] == "organize-complete"
+
+
+def test_duplicate_worker_emits_recycle_completion_event(tmp_path, monkeypatch):
+    first = tmp_path / "first.mp3"
+    second = tmp_path / "second.mp3"
+    first.write_bytes(b"same")
+    second.write_bytes(b"same")
+    finding = DuplicateFinding(
+        id="duplicate-1",
+        paths=(str(first), str(second)),
+        classification="auto-safe",
+        recommendation="Keep one copy.",
+        evidence={},
+        confidence="high",
+    )
+    result = SimpleNamespace(path=str(first), status="succeeded", message="")
+    monkeypatch.setattr(workers, "apply_selected_duplicates", lambda *_args: [result])
+    jobs = BackgroundJobs()
+
+    jobs.remove_duplicates([(finding, (str(first),))])
+    jobs.worker.join(timeout=2)
+
+    assert jobs.events.get_nowait() == ("duplicate-remove-complete", [result])
 
 
 def test_gui_services_apply_exact_reviewed_plan_and_undo(

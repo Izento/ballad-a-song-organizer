@@ -44,3 +44,50 @@ def test_quality_wrapper_is_removed_but_radio_edit_remains_identity():
     qualifiers = parse_qualifiers("Head Up (Original Radio Edit HQ)")
 
     assert qualifiers[0].kind == "version"
+
+
+def test_existing_online_remix_blocks_duplicate_local_remix():
+    assert (
+        preserve_local_versions(
+            "Adagio For Strings (Blasterjaxx Remix)",
+            "United (Tiësto & Blasterjaxx remix)",
+        )
+        == "United (Tiësto & Blasterjaxx remix)"
+    )
+
+
+def test_uppercase_online_remix_is_still_recognized_as_a_version_label():
+    assert (
+        preserve_local_versions(
+            "Adagio For Strings (Blasterjaxx Remix)",
+            "United (Tiësto & Blasterjaxx REMIX)",
+        )
+        == "United (Tiësto & Blasterjaxx REMIX)"
+    )
+
+
+def test_bracketed_online_remix_is_recognized_as_a_trailing_version_label():
+    assert (
+        preserve_local_versions(
+            "Adagio For Strings (Blasterjaxx Remix)",
+            "United [Tiësto & Blasterjaxx Remix]",
+        )
+        == "United [Tiësto & Blasterjaxx Remix]"
+    )
+
+
+def test_conflicting_online_remix_does_not_append_a_second_remix_credit():
+    assert (
+        preserve_local_versions(
+            "United (Dimitri Vegas Remix)",
+            "United (Tiësto & Blasterjaxx remix)",
+        )
+        == "United (Tiësto & Blasterjaxx remix)"
+    )
+
+
+def test_unrelated_remix_credit_remains_a_qualifier_conflict():
+    assert not has_matching_qualifier(
+        "United (Dimitri Vegas Remix)",
+        "United (Tiësto & Blasterjaxx remix)",
+    )

@@ -67,7 +67,7 @@ def test_browse_resets_previous_review_state(tmp_path, monkeypatch, fake_status)
     assert app.status_var.value == "Folder selected. Click Organize library to analyze."
 
 
-def test_select_all_only_affects_the_active_metadata_tab(
+def test_select_all_adds_every_ready_component_in_a_song_group(
     tmp_path,
     fake_tree,
     fake_status,
@@ -85,7 +85,6 @@ def test_select_all_only_affects_the_active_metadata_tab(
         proposed_values={"filename": "new.mp3"},
         confidence="high",
         reason="test",
-        warnings=("Destination collides with another proposal.",),
     )
     tag = TagProposal(
         id="tag-1",
@@ -105,27 +104,136 @@ def test_select_all_only_affects_the_active_metadata_tab(
             tag_proposals=[tag],
         )
     )
-    app.session.row_ids = {
-        ("renames", "shared-row"): rename.id,
-        ("tags", "shared-row"): tag.id,
-        ("errors", "shared-row"): "issue-1",
-    }
+    app.session.row_group_ids = {("changes", "shared-row"): "group-1"}
     app.trees = {
-        "renames": fake_tree({"shared-row": ("☐",)}),
-        "tags": fake_tree({"shared-row": ("☐",)}),
+        "changes": fake_tree({"shared-row": ("☐", "", "", "", "")}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
-    app.tabs = {"renames": "renames-frame", "tags": "tags-frame"}
-    app.notebook = SimpleNamespace(select=lambda: "tags-frame")
     app.status_var = fake_status()
 
     app._select_all()
 
-    assert app.session.selected_ids == {tag.id}
-    assert app.trees["renames"].rows["shared-row"][0] == "☐"
-    assert app.trees["tags"].rows["shared-row"][0] == "☑"
+    assert app.session.selected_ids == {rename.id, tag.id}
+    assert app.trees["changes"].rows["shared-row"][0] == "☑"
 
 
-def test_checkbox_selects_the_entire_decision_group(tmp_path, fake_tree, fake_status):
+def test_bulk_selection_accumulates_and_clear_selection_removes_all(
+    tmp_path,
+    fake_tree,
+    fake_status,
+):
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"audio")
+    snapshot = FileSnapshot.capture(str(source))
+    rename = RenameProposal(
+        id="rename-1",
+        decision_group_id="rename-group",
+        snapshot=snapshot,
+        old_path=str(source),
+        new_path=str(tmp_path / "renamed.mp3"),
+        current_values={"filename": source.name},
+        proposed_values={"filename": "renamed.mp3"},
+        confidence="high",
+        reason="test",
+    )
+    tag = TagProposal(
+        id="tag-1",
+        decision_group_id="tag-group",
+        snapshot=snapshot,
+        path=str(source),
+        before={"artist": "Old"},
+        after={"artist": "New"},
+        confidence="high",
+        reason="test",
+    )
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[rename],
+            tag_proposals=[tag],
+        )
+    )
+    app.session.row_group_ids = {
+        ("changes", "rename-row"): "rename-group",
+        ("changes", "tag-row"): "tag-group",
+    }
+    app.trees = {
+        "changes": fake_tree(
+            {
+                "rename-row": ("☐", "", "", "", ""),
+                "tag-row": ("☐", "", "", "", ""),
+            }
+        ),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
+    }
+    app.status_var = fake_status()
+
+    app._set_selected_ids({rename.id}, expand_groups=False)
+    app._select_all()
+
+    assert app.session.selected_ids == {rename.id, tag.id}
+    assert all(values[0] == "☑" for values in app.trees["changes"].rows.values())
+
+    app._clear_selection()
+
+    assert app.session.selected_ids == set()
+    assert all(values[0] == "☐" for values in app.trees["changes"].rows.values())
+
+
+def test_component_toggle_can_leave_a_partial_song_selection(
+    tmp_path,
+    fake_tree,
+):
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"audio")
+    snapshot = FileSnapshot.capture(str(source))
+    rename = RenameProposal(
+        id="rename-1",
+        decision_group_id="group-1",
+        snapshot=snapshot,
+        old_path=str(source),
+        new_path=str(tmp_path / "renamed.mp3"),
+        current_values={"filename": source.name},
+        proposed_values={"filename": "renamed.mp3"},
+        confidence="high",
+        reason="test",
+    )
+    tag = TagProposal(
+        id="tag-1",
+        decision_group_id="group-1",
+        snapshot=snapshot,
+        path=str(source),
+        before={"artist": "Old"},
+        after={"artist": "New"},
+        confidence="high",
+        reason="test",
+    )
+    app = _bare_app(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[rename],
+            tag_proposals=[tag],
+        )
+    )
+    app.session.row_group_ids = {("changes", "song-row"): "group-1"}
+    app.trees = {
+        "changes": fake_tree({"song-row": ("☐", "", "", "", "")}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
+    }
+    app._set_selected_ids({rename.id, tag.id}, expand_groups=False)
+
+    app._toggle_component_selection(tag.id, False)
+
+    assert app.session.selected_ids == {rename.id}
+    assert app.trees["changes"].rows["song-row"][0] == "◩"
+
+
+def test_checkbox_selects_the_entire_song_group(tmp_path, fake_tree, fake_status):
     source = tmp_path / "old.mp3"
     source.write_bytes(b"audio")
     snapshot = FileSnapshot.capture(str(source))
@@ -158,21 +266,18 @@ def test_checkbox_selects_the_entire_decision_group(tmp_path, fake_tree, fake_st
             tag_proposals=[tag],
         )
     )
-    app.session.row_ids = {
-        ("renames", "rename-row"): rename.id,
-        ("tags", "tag-row"): tag.id,
-    }
+    app.session.row_group_ids = {("changes", "song-row"): "group-1"}
     app.trees = {
-        "renames": fake_tree({"rename-row": ("☐",)}),
-        "tags": fake_tree({"tag-row": ("☐",)}),
+        "changes": fake_tree({"song-row": ("☐", "", "", "", "")}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
     app.status_var = fake_status()
 
-    app._handle_tree_click("renames", SimpleNamespace(x=5, y="rename-row"))
+    app._handle_tree_click("changes", SimpleNamespace(x=5, y="song-row"))
 
     assert app.session.selected_ids == {rename.id, tag.id}
-    assert app.trees["renames"].rows["rename-row"][0] == "☑"
-    assert app.trees["tags"].rows["tag-row"][0] == "☑"
+    assert app.trees["changes"].rows["song-row"][0] == "☑"
 
 
 def test_checkbox_can_select_applyable_review_item(tmp_path, fake_tree, fake_status):
@@ -200,15 +305,16 @@ def test_checkbox_can_select_applyable_review_item(tmp_path, fake_tree, fake_sta
             rename_proposals=[review],
         )
     )
-    app.session.row_ids = {("renames", "review-row"): review.id}
+    app.session.row_group_ids = {("changes", "review-row"): "review"}
     app.trees = {
-        "renames": fake_tree({"review-row": ("☐",)}),
-        "tags": fake_tree({}),
+        "changes": fake_tree({"review-row": ("☐", "", "", "", "")}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
     app.status_var = fake_status()
 
     result = app._handle_tree_click(
-        "renames",
+        "changes",
         SimpleNamespace(x=5, y="review-row"),
     )
 
@@ -216,7 +322,7 @@ def test_checkbox_can_select_applyable_review_item(tmp_path, fake_tree, fake_sta
     assert review.requires_review
     assert review.apply_eligible
     assert app.session.selected_ids == {review.id}
-    assert app.trees["renames"].rows["review-row"][0] == "☑"
+    assert app.trees["changes"].rows["review-row"][0] == "☑"
 
 
 def test_select_all_ready_skips_destination_collisions(tmp_path, fake_tree, fake_status):
@@ -253,57 +359,71 @@ def test_select_all_ready_skips_destination_collisions(tmp_path, fake_tree, fake
             rename_proposals=[safe, review],
         )
     )
-    app.session.row_ids = {
-        ("renames", "safe-row"): safe.id,
-        ("renames", "review-row"): review.id,
+    app.session.row_group_ids = {
+        ("changes", "safe-row"): "safe",
+        ("changes", "review-row"): "review",
     }
     app.trees = {
-        "renames": fake_tree({"safe-row": ("☐",), "review-row": ("☐",)}),
-        "tags": fake_tree({}),
+        "changes": fake_tree(
+            {
+                "safe-row": ("☐", "", "", "", ""),
+                "review-row": ("☐", "", "", "", ""),
+            }
+        ),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
-    app.tabs = {"renames": "renames-frame", "tags": "tags-frame"}
-    app.notebook = SimpleNamespace(select=lambda: "renames-frame")
     app.status_var = fake_status()
 
     app._select_all()
 
     assert app.session.selected_ids == {safe.id}
-    assert app.trees["renames"].rows["safe-row"][0] == "☑"
-    assert app.trees["renames"].rows["review-row"][0] == "☐"
+    assert app.trees["changes"].rows["safe-row"][0] == "☑"
+    assert app.trees["changes"].rows["review-row"][0] == "☐"
 
 
-def test_checkbox_toggles_all_shift_selected_rows(fake_tree):
-    app = _bare_app()
-    app.session.row_ids = {
-        ("renames", "row-1"): "rename-1",
-        ("renames", "row-2"): "rename-2",
-    }
+def test_checkbox_toggles_one_song_group_on_and_off(tmp_path, fake_tree, fake_status):
+    source = tmp_path / "song.mp3"
+    source.write_bytes(b"audio")
+    proposal = RenameProposal(
+        id="rename-1",
+        decision_group_id="group-1",
+        snapshot=FileSnapshot.capture(str(source)),
+        old_path=str(source),
+        new_path=str(tmp_path / "renamed.mp3"),
+        current_values={"filename": source.name},
+        proposed_values={"filename": "renamed.mp3"},
+        confidence="high",
+        reason="test",
+    )
+    app = _bare_app(ReviewPlan.create(str(tmp_path), False, rename_proposals=[proposal]))
+    app.session.row_group_ids = {("changes", "row-1"): "group-1"}
     app.trees = {
-        "renames": fake_tree(
-            {
-                "row-1": ("☐",),
-                "row-2": ("☐",),
-            },
-            selected=("row-1", "row-2"),
-        ),
-        "tags": fake_tree({}),
+        "changes": fake_tree({"row-1": ("☐", "", "", "", "")}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
+    app.status_var = fake_status()
 
     result = app._handle_tree_click(
-        "renames",
-        SimpleNamespace(x=5, y="row-2"),
+        "changes",
+        SimpleNamespace(x=5, y="row-1"),
     )
 
     assert result == "break"
-    assert app.session.selected_ids == {"rename-1", "rename-2"}
-    assert app.trees["renames"].rows["row-1"][0] == "☑"
-    assert app.trees["renames"].rows["row-2"][0] == "☑"
+    assert app.session.selected_ids == {proposal.id}
+    assert app.trees["changes"].rows["row-1"][0] == "☑"
+
+    app._handle_tree_click("changes", SimpleNamespace(x=5, y="row-1"))
+
+    assert app.session.selected_ids == set()
+    assert app.trees["changes"].rows["row-1"][0] == "☐"
 
 
 def test_shift_clicking_checkbox_selects_the_range(tmp_path, fake_tree, fake_status):
     proposals = []
     rows = {}
-    row_ids = {}
+    row_group_ids = {}
     for index in range(1, 4):
         source = tmp_path / f"old-{index}.mp3"
         source.write_bytes(b"audio")
@@ -319,8 +439,8 @@ def test_shift_clicking_checkbox_selects_the_range(tmp_path, fake_tree, fake_sta
             reason="test",
         )
         proposals.append(proposal)
-        rows[f"row-{index}"] = ("☐",)
-        row_ids[("renames", f"row-{index}")] = proposal.id
+        rows[f"row-{index}"] = ("☐", "", "", "", "")
+        row_group_ids[("changes", f"row-{index}")] = proposal.decision_group_id
 
     app = _bare_app(
         ReviewPlan.create(
@@ -329,21 +449,22 @@ def test_shift_clicking_checkbox_selects_the_range(tmp_path, fake_tree, fake_sta
             rename_proposals=proposals,
         )
     )
-    app.session.row_ids = row_ids
-    app.session.selection_anchors = {"renames": "row-1"}
+    app.session.row_group_ids = row_group_ids
+    app.session.selection_anchors = {"changes": "row-1"}
     app.trees = {
-        "renames": fake_tree(rows, selected=("row-1",)),
-        "tags": fake_tree({}),
+        "changes": fake_tree(rows, selected=("row-1",)),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
     app.status_var = fake_status()
 
     result = app._handle_tree_click(
-        "renames",
+        "changes",
         SimpleNamespace(x=5, y="row-3", state=_SHIFT_MASK),
     )
 
     assert result == "break"
-    assert app.trees["renames"].selected == (
+    assert app.trees["changes"].selected == (
         "row-1",
         "row-2",
         "row-3",
@@ -359,10 +480,10 @@ def test_right_click_file_opens_context_menu_for_exact_path(monkeypatch, fake_tr
     app = _bare_app()
     app.root = object()
     app.session.row_paths = {
-        ("renames", "row-1"): r"F:\Music\Hip-Hop\Artist - Song.mp3",
+        ("changes", "row-1"): r"F:\Music\Hip-Hop\Artist - Song.mp3",
     }
     app.trees = {
-        "renames": fake_tree({"row-1": ("☐",)}, selected=()),
+        "changes": fake_tree({"row-1": ("☐",)}, selected=()),
     }
     opened = []
     app._open_in_file_explorer = opened.append
@@ -383,12 +504,12 @@ def test_right_click_file_opens_context_menu_for_exact_path(monkeypatch, fake_tr
     monkeypatch.setattr(gui_app.tk, "Menu", _FakeMenu)
 
     result = app._handle_tree_context_menu(
-        "renames",
+        "changes",
         SimpleNamespace(x_root=40, y_root=50, y="row-1"),
     )
 
     assert result == "break"
-    assert app.trees["renames"].selection() == ("row-1",)
+    assert app.trees["changes"].selection() == ("row-1",)
     assert opened == [r"F:\Music\Hip-Hop\Artist - Song.mp3"]
     assert len(menus) == 1
 
@@ -485,8 +606,53 @@ def test_cover_art_proposal_is_visible_in_metadata_review(tmp_path):
 
     row = plan_rows(plan)[0]
 
-    assert row.action == "Cover art + metadata"
-    assert "Embed cover art: The Album" in row.proposed
+    assert row.action == "Planned changes"
+    assert "Album: The Album" in row.metadata
+    assert "Cover art" in row.metadata
+
+
+def test_plan_rows_group_filename_and_metadata_changes_by_song(tmp_path):
+    source = tmp_path / "Artist - Old Song.mp3"
+    source.write_bytes(b"audio")
+    snapshot = FileSnapshot.capture(str(source))
+    rename = RenameProposal(
+        id="rename-1",
+        decision_group_id="group-1",
+        snapshot=snapshot,
+        old_path=str(source),
+        new_path=str(tmp_path / "Artist - New Song.mp3"),
+        current_values={"filename": source.name},
+        proposed_values={"filename": "Artist - New Song.mp3"},
+        confidence="high",
+        reason="test",
+    )
+    tag = TagProposal(
+        id="tag-1",
+        decision_group_id="group-1",
+        snapshot=snapshot,
+        path=str(source),
+        before={"artist": "Artist", "title": "Old Song"},
+        after={"artist": "Artist", "title": "New Song"},
+        confidence="high",
+        reason="test",
+    )
+
+    rows = plan_rows(
+        ReviewPlan.create(
+            str(tmp_path),
+            False,
+            rename_proposals=[rename],
+            tag_proposals=[tag],
+        )
+    )
+
+    assert len(rows) == 1
+    assert rows[0].tree == "changes"
+    assert rows[0].group_id == "group-1"
+    assert rows[0].proposal_ids == ("rename-1", "tag-1")
+    assert rows[0].filename == "Artist - New Song.mp3"
+    assert rows[0].metadata == "Title: New Song"
+    assert rows[0].status == "ready"
 
 
 def test_select_missing_artwork_includes_medium_confidence_proposals(
@@ -520,14 +686,15 @@ def test_select_missing_artwork_includes_medium_confidence_proposals(
             tag_proposals=[proposal],
         )
     )
-    app.session.row_ids = {("tags", "artwork-row"): proposal.id}
-    tags = fake_tree({"artwork-row": ("☐",)})
-    tags.master = "tags-frame"
+    app.session.row_group_ids = {("changes", "artwork-row"): "group-artwork"}
+    changes = fake_tree({"artwork-row": ("☐", "", "", "", "")})
+    changes.master = "changes-frame"
     app.trees = {
-        "renames": fake_tree({}),
-        "tags": tags,
+        "changes": changes,
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
-    app.tabs = {"tags": "tags-frame"}
+    app.tabs = {"changes": "changes-frame"}
     selected_tabs = []
     app.notebook = SimpleNamespace(select=selected_tabs.append)
     app.status_var = fake_status()
@@ -535,16 +702,18 @@ def test_select_missing_artwork_includes_medium_confidence_proposals(
     app._select_artwork()
 
     assert app.session.selected_ids == {proposal.id}
-    assert tags.rows["artwork-row"][0] == "☑"
-    assert selected_tabs == ["tags-frame"]
+    assert changes.rows["artwork-row"][0] == "☑"
+    assert selected_tabs == ["changes-frame"]
     assert app.status_var.value == "Selected 1 verified cover-art change(s)."
 
 
-def test_populate_plan_renders_each_duplicate_path(tmp_path):
+def test_populate_plan_renders_each_duplicate_path(tmp_path, fake_tree):
     app = _bare_app()
-    rendered = []
-    app._clear_trees = lambda: None
-    app._insert_row = lambda *values: rendered.append(values)
+    app.trees = {
+        "changes": fake_tree({}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
+    }
     finding = DuplicateFinding(
         id="duplicate-1",
         paths=("first.mp3", "second.mp3"),
@@ -562,27 +731,57 @@ def test_populate_plan_renders_each_duplicate_path(tmp_path):
         )
     )
 
-    assert rendered == [
-        (
-            "duplicates",
-            "duplicate-1:1",
-            "unsafe (1/2)",
-            "first.mp3",
-            "Keep both unless you confirm they are equivalent.",
-            "low",
-        ),
-        (
-            "duplicates",
-            "duplicate-1:2",
-            "unsafe (2/2)",
-            "second.mp3",
-            "Keep both unless you confirm they are equivalent.",
-            "low",
-        ),
-    ]
+    rows = app.trees["duplicates"].rows
+    assert [values[1] for values in rows.values()] == ["first.mp3", "second.mp3"]
+    assert [values[0] for values in rows.values()] == ["☐", "☐"]
+    assert set(app.session.duplicate_row_ids.values()) == {
+        ("duplicate-1", "first.mp3"),
+        ("duplicate-1", "second.mp3"),
+    }
 
 
-def test_select_recommended_only_affects_the_active_metadata_tab(
+def test_duplicate_selection_keeps_one_file_and_stays_out_of_apply_ids(
+    tmp_path,
+    fake_tree,
+    fake_status,
+):
+    first = tmp_path / "first.mp3"
+    second = tmp_path / "second.mp3"
+    first.write_bytes(b"same")
+    second.write_bytes(b"same")
+    finding = DuplicateFinding(
+        id="duplicate-1",
+        paths=(str(first), str(second)),
+        classification="auto-safe",
+        recommendation="Keep one copy.",
+        evidence={
+            "hashes": {
+                str(first): "hash",
+                str(second): "hash",
+            }
+        },
+        confidence="high",
+    )
+    app = _bare_app(ReviewPlan.create(str(tmp_path), False, duplicate_findings=[finding]))
+    app.trees = {
+        "changes": fake_tree({}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
+    }
+    app.status_var = fake_status()
+    app._populate_plan(app.session.plan)
+
+    app._handle_tree_click("duplicates", SimpleNamespace(x=5, y="row-0"))
+    assert app.session.duplicate_selected_paths == {"duplicate-1": {str(first)}}
+    assert app.session.selected_ids == set()
+
+    app._handle_tree_click("duplicates", SimpleNamespace(x=5, y="row-1"))
+
+    assert app.session.duplicate_selected_paths == {"duplicate-1": {str(first)}}
+    assert "Keep at least one file" in app.status_var.value
+
+
+def test_select_recommended_adds_complete_recommended_song_groups(
     tmp_path,
     fake_tree,
     fake_status,
@@ -600,7 +799,6 @@ def test_select_recommended_only_affects_the_active_metadata_tab(
         proposed_values={"filename": "Artist - Song (feat. Guest).mp3"},
         confidence="high",
         reason="test",
-        warnings=("Destination collides with another proposal.",),
     )
     tag = TagProposal(
         id="tag-1",
@@ -643,31 +841,30 @@ def test_select_recommended_only_affects_the_active_metadata_tab(
     )
 
     app = _bare_app(plan)
-    app.session.row_ids = {
-        ("renames", "rename-row"): rename.id,
-        ("renames", "low-row"): low_confidence_rename.id,
-        ("renames", "unsafe-row"): unsafe_rename.id,
-        ("tags", "tag-row"): tag.id,
+    app.session.row_group_ids = {
+        ("changes", "group-1-row"): "group-1",
+        ("changes", "group-2-row"): "group-2",
+        ("changes", "group-3-row"): "group-3",
     }
     app.trees = {
-        "renames": fake_tree(
+        "changes": fake_tree(
             {
-                "rename-row": ("☐",),
-                "low-row": ("☐",),
-                "unsafe-row": ("☐",),
+                "group-1-row": ("☐", "", "", "", ""),
+                "group-2-row": ("☐", "", "", "", ""),
+                "group-3-row": ("☐", "", "", "", ""),
             }
         ),
-        "tags": fake_tree({"tag-row": ("☐",)}),
+        "duplicates": fake_tree({}),
+        "errors": fake_tree({}),
     }
-    app.tabs = {"renames": "renames-frame", "tags": "tags-frame"}
-    app.notebook = SimpleNamespace(select=lambda: "tags-frame")
     app.status_var = fake_status()
 
     app._select_recommended()
 
-    assert app.session.selected_ids == {tag.id}
-    assert app.trees["renames"].rows["rename-row"][0] == "☐"
-    assert app.trees["tags"].rows["tag-row"][0] == "☑"
+    assert app.session.selected_ids == {rename.id, tag.id}
+    assert app.trees["changes"].rows["group-1-row"][0] == "☑"
+    assert app.trees["changes"].rows["group-2-row"][0] == "☐"
+    assert app.trees["changes"].rows["group-3-row"][0] == "☐"
 
 
 def test_edit_selected_filename_updates_plan_and_selection(
@@ -698,14 +895,13 @@ def test_edit_selected_filename_updates_plan_and_selection(
         )
     )
     app.session.selected_ids = {proposal.id}
-    app.session.row_ids = {("renames", "rename-row"): proposal.id}
+    app.session.row_group_ids = {("changes", "rename-row"): "group-1"}
     app.session.row_paths = {}
     app.trees = {
-        "renames": fake_tree(
-            {"rename-row": ("☑", "Rename", str(source), "old summary", "high")},
+        "changes": fake_tree(
+            {"rename-row": ("☑", str(source), "old summary", "old tags", "ready")},
             selected=("rename-row",),
         ),
-        "tags": fake_tree({}),
         "duplicates": fake_tree({}),
         "errors": fake_tree({}),
     }
@@ -726,8 +922,8 @@ def test_edit_selected_filename_updates_plan_and_selection(
     assert proposal.id not in app.session.selected_ids
     assert app.session.plan.validate_digest()
     assert any(
-        values[3] == "Artist - Correct Spelling.mp3"
-        for values in app.trees["renames"].rows.values()
+        values[2].endswith("Artist - Correct Spelling.mp3")
+        for values in app.trees["changes"].rows.values()
     )
 
 

@@ -32,6 +32,7 @@ class EventControllerMixin:
             "organize-complete": self._handle_organize_complete,
             "undo-complete": self._handle_undo_complete,
             "apply-complete": self._handle_apply_complete,
+            "duplicate-remove-complete": self._handle_duplicate_remove_complete,
             "failed": self._handle_failed_event,
         }
         handler = handlers.get(event[0])
@@ -54,10 +55,10 @@ class EventControllerMixin:
 
     def _select_review_tab(self) -> None:
         plan = self.session.plan
-        if plan.tag_proposals:
-            self.notebook.select(self.tabs["tags"])
-        elif plan.rename_proposals:
-            self.notebook.select(self.tabs["renames"])
+        if plan.rename_proposals or plan.tag_proposals:
+            self.notebook.select(self.tabs["changes"])
+        elif plan.duplicate_findings:
+            self.notebook.select(self.tabs["duplicates"])
 
     def _show_analysis_summary(self) -> None:
         plan = self.session.plan
@@ -92,7 +93,7 @@ class EventControllerMixin:
             f"{len(grouped_action_ids(plan))} song(s), {len(recommended_ids(plan))} "
             f"high-confidence and recommended, {unresolved} item(s) need review, "
             f"{duplicate_summary} Nothing has changed yet — select changes and click "
-            "'Apply selected'."
+            "'Apply selected'. Duplicate findings can be reviewed separately."
         )
 
     def _handle_undo_complete(self, event: tuple) -> None:
@@ -129,6 +130,35 @@ class EventControllerMixin:
         self._append_activity_log(summary)
         if failed or blocked:
             self._show_apply_issues(summary, blocked, failed)
+
+    def _handle_duplicate_remove_complete(self, event: tuple) -> None:
+        results = event[1]
+        succeeded = [result for result in results if result.status == "succeeded"]
+        failures = [result for result in results if result.status != "succeeded"]
+        self._set_busy(False)
+        if succeeded:
+            self._reset_review_state()
+        summary = (
+            f"Duplicate removal complete: {len(succeeded)} moved to Recycle Bin, "
+            f"{len(failures)} failed."
+        )
+        self.status_var.set(summary)
+        self._append_activity_log(summary)
+        if succeeded:
+            self.status_var.set(summary + " Organize the folder again to refresh the review.")
+        if failures:
+            self._show_duplicate_remove_failures(failures)
+
+    def _show_duplicate_remove_failures(self, failures) -> None:
+        details = "\n".join(
+            f"• {Path(result.path).name}: {result.message}" for result in failures[:10]
+        )
+        if len(failures) > 10:
+            details += f"\n… and {len(failures) - 10} more."
+        messagebox.showwarning(
+            "Duplicate removal needs attention",
+            f"{len(failures)} file(s) could not be moved:\n\n{details}",
+        )
 
     def _apply_summary(self, results) -> tuple[str, int, int]:
         succeeded = sum(result.status == "succeeded" for result in results)

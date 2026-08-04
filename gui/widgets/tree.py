@@ -20,46 +20,44 @@ class TreeMixin:
     """Render and maintain the plan's review-table rows."""
 
     def _tree_spec(self, key: str) -> tuple[tuple[str, ...], dict, dict]:
-        if key == "renames":
-            return self._rename_tree_spec()
-        if key == "tags":
-            return self._tag_tree_spec()
+        if key == "changes":
+            return self._changes_tree_spec()
+        if key == "duplicates":
+            return self._duplicates_tree_spec()
         return self._readonly_tree_spec()
 
-    def _rename_tree_spec(self) -> tuple[tuple[str, ...], dict, dict]:
-        columns = ("selected", "action", "current", "proposed", "confidence")
+    def _changes_tree_spec(self) -> tuple[tuple[str, ...], dict, dict]:
+        columns = ("selected", "file", "filename", "metadata", "status")
         headings = {
             "selected": "",
-            "action": "Action",
-            "current": "Current filename",
-            "proposed": "Proposed filename",
-            "confidence": "Confidence",
+            "file": "Current file",
+            "filename": "Rename to",
+            "metadata": "Set metadata",
+            "status": "Status",
         }
         widths = {
             "selected": 26,
-            "action": 82,
-            "current": 440,
-            "proposed": 440,
-            "confidence": 72,
+            "file": 160,
+            "filename": 240,
+            "metadata": 210,
+            "status": 92,
         }
         return columns, headings, widths
 
-    def _tag_tree_spec(self) -> tuple[tuple[str, ...], dict, dict]:
-        columns = ("selected", "action", "file", "current", "proposed", "confidence")
+    def _duplicates_tree_spec(self) -> tuple[tuple[str, ...], dict, dict]:
+        columns = ("selected", "file", "classification", "details", "confidence")
         headings = {
-            "selected": "",
-            "action": "Action",
+            "selected": "Remove",
             "file": "File",
-            "current": "Current tags",
-            "proposed": "Proposed tags",
+            "classification": "Finding",
+            "details": "Recommendation",
             "confidence": "Confidence",
         }
         widths = {
             "selected": 26,
-            "action": 82,
-            "file": 170,
-            "current": 350,
-            "proposed": 350,
+            "file": 350,
+            "classification": 130,
+            "details": 460,
             "confidence": 72,
         }
         return columns, headings, widths
@@ -97,7 +95,7 @@ class TreeMixin:
             frame,
             columns=columns,
             show="headings",
-            selectmode="extended" if key in {"renames", "tags"} else "browse",
+            selectmode="extended" if key in {"changes", "duplicates"} else "browse",
             style=_TREE_STYLE,
         )
         return frame, tree
@@ -117,7 +115,7 @@ class TreeMixin:
                 width=widths[column],
                 minwidth=widths[column] if fixed else 180,
                 stretch=not fixed,
-                anchor=tk.CENTER if column in {"selected", "confidence"} else tk.W,
+                anchor=tk.CENTER if column in {"selected", "confidence", "status"} else tk.W,
             )
 
     def _configure_tree_tags(self, tree) -> None:
@@ -151,7 +149,10 @@ class TreeMixin:
             for column, label in headings.get(tree_name, {}).items():
                 tree.heading(column, text=label)
         self.session.row_ids.clear()
+        self.session.row_group_ids.clear()
         self.session.row_paths.clear()
+        self.session.duplicate_row_ids.clear()
+        self.session.duplicate_selected_paths.clear()
         self.session.sort_state.clear()
         self.session.selection_anchors.clear()
 
@@ -177,16 +178,10 @@ class TreeMixin:
     def _populate_plan(self, plan: ReviewPlan) -> None:
         self._clear_trees()
         for row in plan_rows(plan):
-            if row.is_change:
-                self._insert_change_row(
-                    row.tree,
-                    row.item_id,
-                    row.action,
-                    row.path,
-                    row.current,
-                    row.proposed,
-                    row.confidence,
-                )
+            if row.tree == "changes":
+                self._insert_change_row(row)
+            elif row.is_duplicate:
+                self._insert_duplicate_row(row)
             else:
                 self._insert_row(
                     row.tree,
@@ -196,6 +191,32 @@ class TreeMixin:
                     row.current,
                     row.confidence,
                 )
+
+    def _insert_change_row(self, row) -> None:
+        tree = self.trees["changes"]
+        values = (
+            "☐",
+            Path(row.path).name if row.path else "",
+            row.filename,
+            row.metadata,
+            row.status,
+        )
+        tree_row = tree.insert("", tk.END, values=values, tags=_confidence_row_tags(row.confidence))
+        self.session.row_group_ids[("changes", tree_row)] = row.group_id
+        self.session.row_paths[("changes", tree_row)] = row.path
+
+    def _insert_duplicate_row(self, row) -> None:
+        tree = self.trees["duplicates"]
+        values = (
+            "☐",
+            Path(row.path).name if row.path else "",
+            row.action,
+            row.current,
+            row.confidence,
+        )
+        tree_row = tree.insert("", tk.END, values=values, tags=_confidence_row_tags(row.confidence))
+        self.session.duplicate_row_ids[("duplicates", tree_row)] = (row.duplicate_id, row.path)
+        self.session.row_paths[("duplicates", tree_row)] = row.path
 
     def _insert_row(
         self,
@@ -213,24 +234,6 @@ class TreeMixin:
             values=(action, Path(path).name if path else "", summary, confidence),
             tags=_confidence_row_tags(confidence),
         )
-        self.session.row_ids[(tree_name, row)] = item_id
-        self.session.row_paths[(tree_name, row)] = path
-
-    def _insert_change_row(
-        self,
-        tree_name: str,
-        item_id: str,
-        action: str,
-        path: str,
-        *details: str,
-    ) -> None:
-        current, proposed, confidence = details
-        tree = self.trees[tree_name]
-        values = ["☐", action]
-        if tree_name == "tags":
-            values.append(Path(path).name if path else "")
-        values.extend((current, proposed, confidence))
-        row = tree.insert("", tk.END, values=values, tags=_confidence_row_tags(confidence))
         self.session.row_ids[(tree_name, row)] = item_id
         self.session.row_paths[(tree_name, row)] = path
 

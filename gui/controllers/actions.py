@@ -31,11 +31,13 @@ class ActionControllerMixin:
         self.session.selected_ids.clear()
         self.session.applied_group_ids.clear()
         self.session.recovery_overrides.clear()
+        self.session.duplicate_selected_paths.clear()
         self._clear_trees()
         self._clear_activity_log()
         self._update_review_details(None)
         self.status_var.set("Folder selected. Click Organize library to analyze.")
         self._update_primary_button()
+        self._update_duplicate_remove_button()
 
     def _organize_library(self) -> None:
         folder = self.folder_var.get().strip()
@@ -68,7 +70,7 @@ class ActionControllerMixin:
             "Ballad will identify songs, enrich metadata, and prepare a reviewable "
             "plan of filename changes, tag changes, and cover art.\n\nNothing on "
             "disk changes until you select proposals below and click 'Apply selected'. "
-            "Duplicate findings are always read-only.\n\nContinue?",
+            "Duplicate findings can be reviewed separately for Recycle Bin removal.\n\nContinue?",
         )
 
     def _prepare_analysis(self, folder: str, removed_artwork) -> None:
@@ -111,6 +113,55 @@ class ActionControllerMixin:
         self._set_busy(True)
         self.jobs.apply(plan, tuple(self.session.selected_ids))
 
+    def _remove_selected_duplicates(self) -> None:
+        targets = self._selected_duplicate_findings()
+        if not targets:
+            self.status_var.set("Select duplicate files to move to the Recycle Bin.")
+            return
+        plan = self.session.plan
+        if plan is None or not plan.validate_digest():
+            messagebox.showerror(
+                "Duplicate findings expired",
+                "The reviewed duplicate findings are stale. Organize the library again.",
+            )
+            return
+        if not self._confirm_duplicate_removal(targets):
+            return
+        count = sum(len(paths) for _finding, paths in targets)
+        self._append_activity_log(f"Moving {count} duplicate file(s) to the Recycle Bin.")
+        self._set_busy(True)
+        self.jobs.remove_duplicates(targets)
+
+    def _selected_duplicate_findings(self) -> list[tuple[Any, tuple[str, ...]]]:
+        plan = self.session.plan
+        if plan is None:
+            return []
+        selected = self.session.duplicate_selected_paths
+        return [
+            (
+                finding,
+                tuple(path for path in finding.paths if path in selected.get(finding.id, set())),
+            )
+            for finding in plan.duplicate_findings
+            if selected.get(finding.id)
+        ]
+
+    def _confirm_duplicate_removal(self, targets: list[tuple[Any, tuple[str, ...]]]) -> bool:
+        details = []
+        for finding, selected in targets:
+            retained = [path for path in finding.paths if path not in selected]
+            details.append(
+                f"{finding.classification}:\n"
+                f"  Move: {', '.join(Path(path).name for path in selected)}\n"
+                f"  Keep: {', '.join(Path(path).name for path in retained)}"
+            )
+        return messagebox.askyesno(
+            "Move duplicates to Recycle Bin",
+            "The following files will be moved to the Windows Recycle Bin:\n\n"
+            + "\n\n".join(details)
+            + "\n\nYou can restore them from the Recycle Bin.",
+        )
+
     def _can_apply_plan(self, plan) -> bool:
         pending = batches_requiring_recovery(plan.root)
         if pending and not self._confirm_recovery_override(pending, plan.root):
@@ -137,18 +188,16 @@ class ActionControllerMixin:
 
     def _handle_quarantine_button_click(self) -> None:
         proposals = self._selected_proposals_in_active_tree()
-        if proposals:
-            self._quarantine_proposals(proposals)
-        else:
-            self._show_quarantine_manager()
+        if not proposals:
+            self.status_var.set("Select one or more changes to quarantine.")
+            return
+        self._quarantine_proposals(proposals)
 
     def _selected_proposals_in_active_tree(self) -> list[Any]:
         scope = self._active_action_scope()
-        tree_name = (
-            {"filename": "renames", "metadata": "tags"}.get(scope[0], "renames")
-            if scope
-            else "renames"
-        )
+        if scope is None:
+            return []
+        tree_name = "changes"
         proposals = self._proposals_from_selected_rows(tree_name)
         if proposals:
             return proposals
@@ -165,11 +214,11 @@ class ActionControllerMixin:
             return []
         seen, proposals = set(), []
         for row in tree.selection():
-            item_id = self.session.row_ids.get((tree_name, row))
-            proposal = self.session.proposal_for_id(item_id) if item_id not in seen else None
-            if proposal is not None:
-                seen.add(item_id)
-                proposals.append(proposal)
+            group_id = self.session.row_group_ids.get((tree_name, row))
+            if group_id in seen:
+                continue
+            proposals.extend(self.session.proposals_for_group(group_id))
+            seen.add(group_id)
         return proposals
 
     def _quarantine_proposals(self, proposals: list[Any]) -> None:
@@ -289,14 +338,19 @@ class ActionControllerMixin:
         if plan is None:
             messagebox.showinfo("Nothing to edit", "Organize a library first.")
             return None
-        rows = self.trees["renames"].selection()
+        rows = self.trees["changes"].selection()
         if len(rows) != 1:
-            messagebox.showinfo(
-                "Choose a rename", "Click one row in Proposed renames, then choose Edit filename."
-            )
+            messagebox.showinfo("Choose a rename", "Click one song row, then choose Edit filename.")
             return None
-        item_id = self.session.row_ids.get(("renames", rows[0]))
-        return next((item for item in plan.rename_proposals if item.id == item_id), None)
+        group_id = self.session.row_group_ids.get(("changes", rows[0]))
+        return next(
+            (
+                item
+                for item in self.session.proposals_for_group(group_id)
+                if hasattr(item, "old_path")
+            ),
+            None,
+        )
 
     def _rename_edit_is_blocked(self, proposal) -> bool:
         if proposal is not None and not self._group_was_applied(proposal):
