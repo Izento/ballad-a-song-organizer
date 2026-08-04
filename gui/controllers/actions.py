@@ -24,6 +24,18 @@ class ActionControllerMixin:
         selected = filedialog.askdirectory(title="Choose music folder")
         if selected:
             self.folder_var.set(selected)
+            self._reset_review_state()
+
+    def _reset_review_state(self) -> None:
+        self.session.plan = None
+        self.session.selected_ids.clear()
+        self.session.applied_group_ids.clear()
+        self.session.recovery_overrides.clear()
+        self._clear_trees()
+        self._clear_activity_log()
+        self._update_review_details(None)
+        self.status_var.set("Folder selected. Click Organize library to analyze.")
+        self._update_primary_button()
 
     def _organize_library(self) -> None:
         folder = self.folder_var.get().strip()
@@ -60,11 +72,7 @@ class ActionControllerMixin:
         )
 
     def _prepare_analysis(self, folder: str, removed_artwork) -> None:
-        self.session.plan = None
-        self.session.selected_ids.clear()
-        self.session.applied_group_ids.clear()
-        self._clear_trees()
-        self._clear_activity_log()
+        self._reset_review_state()
         if removed_artwork:
             self._append_activity_log(
                 "Removed shared folder artwork: " + ", ".join(path.name for path in removed_artwork)

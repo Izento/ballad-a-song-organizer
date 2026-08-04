@@ -35,6 +35,38 @@ def _bare_app(plan=None) -> SongOrganizerApp:
     return app
 
 
+def test_browse_resets_previous_review_state(tmp_path, monkeypatch, fake_status):
+    selected_folder = tmp_path / "new-library"
+    selected_folder.mkdir()
+    plan = ReviewPlan.create(str(tmp_path), False)
+    app = _bare_app(plan)
+    app.session.selected_ids.add("old-selection")
+    app.session.applied_group_ids.add("old-group")
+    app.session.recovery_overrides.add(str(tmp_path))
+    app.folder_var = SimpleNamespace(set=lambda value: setattr(app, "selected_folder", value))
+    app.status_var = fake_status()
+    cleared = []
+    app._clear_trees = lambda: cleared.append("trees")
+    app._clear_activity_log = lambda: cleared.append("activity")
+    app._update_review_details = lambda proposal: cleared.append(("details", proposal))
+    app._update_primary_button = lambda: cleared.append("primary")
+    monkeypatch.setattr(
+        action_controller.filedialog,
+        "askdirectory",
+        lambda title: str(selected_folder),
+    )
+
+    app._browse()
+
+    assert app.selected_folder == str(selected_folder)
+    assert app.session.plan is None
+    assert app.session.selected_ids == set()
+    assert app.session.applied_group_ids == set()
+    assert app.session.recovery_overrides == set()
+    assert cleared == ["trees", "activity", ("details", None), "primary"]
+    assert app.status_var.value == "Folder selected. Click Organize library to analyze."
+
+
 def test_select_all_only_affects_the_active_metadata_tab(
     tmp_path,
     fake_tree,
