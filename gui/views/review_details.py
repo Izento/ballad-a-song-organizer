@@ -12,7 +12,8 @@ from typing import Any
 
 from PIL import Image, ImageTk
 
-from gui.presentation import confidence_color, metadata_differences, proposal_evidence
+from gui.presentation import metadata_differences, proposal_evidence
+from gui.theme import confidence_style
 from renamer.media import read_front_artwork
 
 
@@ -186,7 +187,7 @@ class ReviewDetailsMixin:
         ttk.Label(
             frame,
             text=f"Confidence: {confidence}",
-            foreground=confidence_color(confidence),
+            style=confidence_style(confidence),
             font=("TkDefaultFont", 9, "bold"),
         ).pack(side=tk.LEFT)
         return file_path
@@ -209,7 +210,7 @@ class ReviewDetailsMixin:
         ttk.Label(
             parent,
             text=f"• {getattr(issue, 'message', str(issue))}",
-            foreground="red" if not getattr(issue, "apply_eligible", True) else "#d9534f",
+            style="Ballad.Error.TLabel",
             wraplength=300,
             justify=tk.LEFT,
         ).pack(anchor=tk.W, pady=1)
@@ -218,7 +219,7 @@ class ReviewDetailsMixin:
         ttk.Label(
             parent,
             text=f"• {warning}",
-            foreground="#d9534f",
+            style="Ballad.Error.TLabel",
             wraplength=300,
             justify=tk.LEFT,
         ).pack(anchor=tk.W, pady=1)
@@ -236,9 +237,9 @@ class ReviewDetailsMixin:
             ttk.Label(container, text="Cover art: Add or replace embedded cover").pack(anchor=tk.W)
             changed = True
         if not changed:
-            ttk.Label(container, text="No visible tag fields change.", foreground="gray").pack(
-                anchor=tk.W
-            )
+            ttk.Label(
+                container, text="No visible tag fields change.", style="Ballad.Muted.TLabel"
+            ).pack(anchor=tk.W)
 
     def _add_metadata_row(self, parent, label: str, before: object, after: object) -> None:
         row = ttk.Frame(parent)
@@ -247,7 +248,7 @@ class ReviewDetailsMixin:
         ttk.Label(
             row,
             text=f"Current: {_display_value(before)}",
-            foreground="gray",
+            style="Ballad.Muted.TLabel",
             wraplength=300,
             justify=tk.LEFT,
         ).pack(anchor=tk.W)
@@ -267,7 +268,7 @@ class ReviewDetailsMixin:
         ttk.Label(
             parent,
             text=f"Current: {old_name}",
-            foreground="gray",
+            style="Ballad.Muted.TLabel",
             wraplength=300,
             justify=tk.LEFT,
         ).pack(anchor=tk.W)
@@ -284,9 +285,11 @@ class ReviewDetailsMixin:
         box = ttk.Labelframe(container, text="Verification", padding=6)
         box.pack(fill=tk.X, pady=(0, 8))
         if not (identification or musicbrainz):
-            ttk.Label(box, text="No online provider evidence attached.", foreground="gray").pack(
-                anchor=tk.W
-            )
+            ttk.Label(
+                box,
+                text="No online provider evidence attached.",
+                style="Ballad.Muted.TLabel",
+            ).pack(anchor=tk.W)
             return
         self._render_identification_evidence(box, identification)
         self._render_musicbrainz_evidence(box, musicbrainz)
@@ -334,11 +337,11 @@ class ReviewDetailsMixin:
         )
         current_art_bytes, _ = current_art or (None, "")
         if not current_art_bytes:
-            ttk.Label(frame, text="[No cover art]", foreground="gray").pack(pady=20)
+            ttk.Label(frame, text="[No cover art]", style="Ballad.Muted.TLabel").pack(pady=20)
             return
         image = self._load_tk_image_bytes(current_art_bytes)
         if image is None:
-            ttk.Label(frame, text="[Image decode error]", foreground="red").pack(pady=10)
+            ttk.Label(frame, text="[Image decode error]", style="Ballad.Error.TLabel").pack(pady=10)
             return
         self._preview_images.append(image)
         ttk.Label(frame, image=image).pack(pady=4)
@@ -358,7 +361,7 @@ class ReviewDetailsMixin:
             frame,
             text="Embedded (Stale)" if stale else "Embedded Cover",
             font=("TkDefaultFont", 7),
-            foreground="#d9534f" if stale else "gray",
+            style="Ballad.Error.TLabel" if stale else "Ballad.Muted.TLabel",
         ).pack(anchor=tk.N)
 
     def _render_staged_artwork(self, parent, proposal) -> None:
@@ -366,11 +369,11 @@ class ReviewDetailsMixin:
         artwork = getattr(proposal, "artwork_after", None)
         path = getattr(artwork, "path", None) if artwork else None
         if not path or not os.path.isfile(path):
-            ttk.Label(frame, text="[No change]", foreground="gray").pack(pady=20)
+            ttk.Label(frame, text="[No change]", style="Ballad.Muted.TLabel").pack(pady=20)
             return
         image = self._load_tk_image_file(path)
         if image is None:
-            ttk.Label(frame, text="[Decode error]", foreground="red").pack(pady=10)
+            ttk.Label(frame, text="[Decode error]", style="Ballad.Error.TLabel").pack(pady=10)
             return
         self._preview_images.append(image)
         ttk.Label(frame, image=image).pack(pady=4)
@@ -383,7 +386,7 @@ class ReviewDetailsMixin:
             if release_id
             else ("CAA Source" if source_url else "Proposed")
         )
-        ttk.Label(frame, text=label, font=("TkDefaultFont", 7), foreground="green").pack(
+        ttk.Label(frame, text=label, font=("TkDefaultFont", 7), style="Ballad.Success.TLabel").pack(
             anchor=tk.N
         )
 

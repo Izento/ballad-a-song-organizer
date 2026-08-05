@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from gui.presentation import format_local_timestamp
+from gui.theme import apply_theme, get_widget_theme_mode
 from renamer.apply import batch_history, undo_batch
 from renamer.review_models import path_key
 
@@ -29,6 +30,7 @@ class HistoryDialogMixin:
 
     def _build_history_window(self):
         window = tk.Toplevel(self.root)
+        apply_theme(window, get_widget_theme_mode(self.root))
         window.title("Ballad history & restoration")
         window.geometry("880x460")
         paned = ttk.PanedWindow(window, orient=tk.HORIZONTAL)

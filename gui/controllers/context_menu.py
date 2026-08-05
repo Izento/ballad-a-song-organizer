@@ -9,6 +9,8 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 
+from gui.theme import get_theme_palette
+
 
 class ContextMenuMixin:
     """Expose playback, file location, evidence, and quarantine actions."""
@@ -30,7 +32,17 @@ class ContextMenuMixin:
         return "break"
 
     def _file_context_menu(self, path: str):
-        menu = tk.Menu(self.root, tearoff=False)
+        mode = getattr(self.root, "_ballad_theme_mode", "dark")
+        palette = get_theme_palette(mode)
+        menu = tk.Menu(
+            self.root,
+            tearoff=False,
+            background=palette.surface_background,
+            foreground=palette.text,
+            activebackground=palette.selected_background,
+            activeforeground=palette.selected_text,
+            disabledforeground=palette.disabled_text,
+        )
         menu.add_command(label="Play", command=lambda: self._open_with_default_app(path))
         menu.add_command(
             label="Open in File Explorer", command=lambda: self._open_in_file_explorer(path)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import tkinter as tk
 from tkinter import simpledialog, ttk
 
+from gui.theme import apply_theme, get_widget_theme_mode
+
 
 class _FilenameDialog(simpledialog.Dialog):
     """Ask for a corrected filename without changing its extension."""
@@ -12,7 +14,9 @@ class _FilenameDialog(simpledialog.Dialog):
     def __init__(self, parent, initialvalue: str):
         self.initialvalue = initialvalue
         self.result: str | None = None
+        self._theme_mode = get_widget_theme_mode(parent)
         super().__init__(parent, title="Correct proposed filename")
+        apply_theme(self, self._theme_mode)
 
     def body(self, master):
         self.minsize(680, 120)

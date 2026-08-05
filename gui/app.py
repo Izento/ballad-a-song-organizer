@@ -23,10 +23,9 @@ from gui.presentation import shared_folder_artwork as _shared_folder_artwork  # 
 from gui.presentation import tag_display as _tag_display  # noqa: F401
 from gui.session import ReviewSession
 from gui.theme import (
-    _PRIMARY_BUTTON_ACTIVE_BG,
-    _PRIMARY_BUTTON_BG,
-    _PRIMARY_BUTTON_DISABLED_FG,
     _SHIFT_MASK,  # noqa: F401
+    apply_theme,
+    get_theme_palette,
 )
 from gui.views.activity_sidebar import ActivitySidebarMixin
 from gui.views.review_details import ReviewDetailsMixin
@@ -87,7 +86,9 @@ class SongOrganizerApp(
         self._initialize_session()
         self._initialize_capabilities()
         self._initialize_controls()
+        self._theme_mode = "dark"
         self._build_ui()
+        apply_theme(self.root, self._theme_mode)
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.after(100, self._poll_events)
 
@@ -130,6 +131,7 @@ class SongOrganizerApp(
         )
         self.cover_art_var = tk.BooleanVar(value=True)
         self.propose_renames_var = tk.BooleanVar(value=False)
+        self.dark_mode_var = tk.BooleanVar(value=True)
 
     def _set_window_icon(self) -> None:
         icon_path = resource_path("ballad.ico")
@@ -200,6 +202,17 @@ class SongOrganizerApp(
         self._build_primary_button(row)
         ttk.Checkbutton(row, text="Include subfolders", variable=self.recursive_var).pack(
             side=tk.LEFT, padx=(10, 0)
+        )
+        theme_check = ttk.Checkbutton(
+            row,
+            text="Dark mode",
+            variable=self.dark_mode_var,
+            command=self._toggle_theme,
+        )
+        theme_check.pack(side=tk.LEFT, padx=(10, 0))
+        _add_tooltip(
+            theme_check,
+            "Switch between Ballad's dark and light interface themes.",
         )
         self._build_action_controls(library)
         ttk.Label(library, textvariable=self.capability_var).pack(anchor=tk.W, pady=(8, 0))
@@ -354,15 +367,16 @@ class SongOrganizerApp(
             button.pack(side=tk.LEFT, padx=(8, 0))
 
     def _build_primary_button(self, parent) -> None:
+        palette = get_theme_palette(self._theme_mode)
         self.primary_button = tk.Button(
             parent,
             text="Organize library",
             command=self._organize_library,
-            background=_PRIMARY_BUTTON_BG,
-            activebackground=_PRIMARY_BUTTON_ACTIVE_BG,
-            foreground="white",
-            activeforeground="white",
-            disabledforeground=_PRIMARY_BUTTON_DISABLED_FG,
+            background=palette.primary_button,
+            activebackground=palette.primary_button_active,
+            foreground=palette.selected_text,
+            activeforeground=palette.selected_text,
+            disabledforeground=palette.primary_button_disabled,
             font=("TkDefaultFont", 10, "bold"),
             relief=tk.FLAT,
             cursor="hand2",
@@ -371,6 +385,10 @@ class SongOrganizerApp(
         )
         self.primary_button.pack(side=tk.LEFT, padx=(8, 0))
         self._update_primary_button()
+
+    def _toggle_theme(self) -> None:
+        self._theme_mode = "dark" if self.dark_mode_var.get() else "light"
+        apply_theme(self.root, self._theme_mode)
 
     def _sync_fingerprint_availability(self, *_args, busy: bool | None = None) -> None:
         busy = self.jobs.active if busy is None else busy

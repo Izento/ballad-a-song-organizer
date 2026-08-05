@@ -43,10 +43,7 @@ class _Tooltip:
         return ttk.Label(
             self._tip,
             text=self.text,
-            background="#ffffe0",
-            relief=tk.SOLID,
-            borderwidth=1,
-            padding=(6, 3),
+            style="Ballad.Tooltip.TLabel",
             wraplength=320,
             justify=tk.LEFT,
         )
