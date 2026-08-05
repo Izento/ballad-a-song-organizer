@@ -1,10 +1,44 @@
 # Ballad: A Song Organizer
 
-Ballad is a review-first Windows music-library organizer. It analyzes a folder
-without changing files, presents filename and tag repairs for review, and
-applies only the actions the user selects.
+Ballad is a review-first Windows organizer for messy, existing music folders:
+loose tracks, imperfect rips, old downloads, remixes, instrumentals, and for filenames or tags that no longer describe what they contain. It analyzes a
+folder without changing files, analyzes it in parallel, presents
+evidence-backed repairs in a compact review plan, and applies the selected
+changes as a validated batch.
 
-## What it does
+Its purpose is not to force every file into an official release. Ballad uses
+optional AcoustID and MusicBrainz evidence to improve identifiable recordings
+while preserving meaningful local version identities, such as a remix, radio
+edit, instrumental, freestyle, or unreleased track, especially when it cannot safely be
+treated as the canonical release recording.
+
+## Objective
+
+Ballad was built to solve four problems safely:
+
+1. Turn inconsistent filenames and partial tags into a readable local library.
+2. Enrich verified recordings without silently overwriting custom or derivative
+   track identity.
+3. Let a person review exactly what will change before a batch touches disk.
+4. Find duplicate audio and make removal reversible instead of permanently
+   deleting files.
+
+The normal workflow is **Analyze → Review → Apply**. Analysis is read-only;
+the review screen groups filename and metadata proposals by song; applying
+changes validates the reviewed files again before writing.
+
+Ballad intentionally is not:
+
+- A CD ripper, DiscID lookup client, or album-clustering application.
+- A general-purpose media player, streaming client, or library database.
+- A replacement for a fully scriptable tag editor or plugin ecosystem.
+- A tool that automatically deletes files or applies ambiguous matches without
+  review.
+
+It can enrich album, track, and disc metadata for a verified recording, but
+the review unit remains one file/song rather than an album release tree.
+
+## Core capabilities
 
 - Normalizes filenames to `Artist - Title (feat. Guest).ext`.
 - Audits and repairs tags to match approved filenames.
@@ -12,7 +46,8 @@ applies only the actions the user selects.
   AcoustID lookup.
 - Enriches verified recordings with MusicBrainz artist credits, release,
   date, genre, credits, identifiers, and missing front artwork.
-- Finds duplicate candidates without deleting files.
+- Finds duplicate candidates using content hashes, optional audio
+  fingerprints, and recording identity evidence.
 - Journals applied changes and supports guarded undo.
 
 ## Run from source
@@ -43,8 +78,10 @@ uv run ballad undo
 The GUI's **Organize library** action asks for confirmation, identifies songs,
 writes all verified metadata, embeds missing front cover art, and renames the
 same verified files. Ambiguous recordings and unsupported files remain
-unchanged and appear in **Skipped / errors**; duplicate findings remain
-read-only. The tag row's context menu can show the MusicBrainz and
+unchanged and appear in **Skipped / errors**. Duplicate findings appear on
+their own review tab: the user can select confirmed unwanted copies, keep at
+least one file in every group, and send unchanged selections to the Windows
+Recycle Bin. The tag row's context menu can show the MusicBrainz and
 identification evidence used for a proposal.
 
 From the command line, `ballad enrich` previews proposals. Add `--apply` to
@@ -132,8 +169,10 @@ update them together only after reviewing a new official Chromaprint release.
   that song's rename without stopping unrelated songs.
 - Applied filename and tag changes are journaled for recovery and verified,
   atomic undo.
-- Duplicate findings are read-only; no normal operation permanently deletes
-  files.
+- Duplicate cleanup requires explicit selection and confirmation, keeps at
+  least one file in each finding, rechecks each selected file's content hash,
+  and sends it to the Windows Recycle Bin. No normal operation permanently
+  deletes files.
 - CLI rename and tag changes require `--apply`; `ballad undo` restores the
   latest recoverable journaled batch.
 
