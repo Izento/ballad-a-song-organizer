@@ -47,7 +47,9 @@ def test_recovery_queries_can_be_scoped_to_review_root(
     assert [
         batch["batch_id"] for batch in apply_module.batches_requiring_recovery(str(second_root))
     ] == ["second"]
-    assert apply_module.latest_undoable_batch(str(second_root))["batch_id"] == "second"
+    latest = apply_module.latest_undoable_batch(str(second_root))
+    assert latest is not None
+    assert latest["batch_id"] == "second"
 
 
 def test_apply_uses_reviewed_rename_and_undo(tmp_path, monkeypatch, app_paths):
@@ -74,7 +76,9 @@ def test_apply_uses_reviewed_rename_and_undo(tmp_path, monkeypatch, app_paths):
     assert results[0].status == "succeeded"
     assert destination.read_bytes() == b"audio"
     assert not source.exists()
-    assert apply_module.latest_undoable_batch()["batch_id"] == plan.batch_id
+    latest = apply_module.latest_undoable_batch()
+    assert latest is not None
+    assert latest["batch_id"] == plan.batch_id
 
     undo_results = apply_module.undo_batch(plan.batch_id)
 
@@ -120,11 +124,13 @@ def test_tag_apply_restores_backup(tmp_path, monkeypatch, app_paths):
     results = apply_module.apply_review_plan(plan, [proposal.id])
 
     assert results[0].status == "succeeded"
-    assert Path(results[0].backup_path).exists()
+    backup_path = results[0].backup_path
+    assert backup_path is not None
+    assert Path(backup_path).exists()
     assert written[0][0] != str(source)
     assert Path(written[0][0]).suffix == ".mp3"
     assert written[0][1] == {"artist": "Artist", "title": "Song"}
-    backup = json.loads(Path(results[0].backup_path).read_text(encoding="utf-8"))
+    backup = json.loads(Path(backup_path).read_text(encoding="utf-8"))
     assert backup["before"] == {"artist": "Wrong", "title": "Wrong"}
 
 
@@ -520,12 +526,16 @@ def test_undo_restores_original_front_artwork_bytes(
 
     applied = apply_module.apply_review_plan(plan, [proposal.id])
     assert applied[0].status == "succeeded"
-    assert read_media(str(source)).artwork.sha256 == replacement_art["sha256"]
+    applied_artwork = read_media(str(source)).artwork
+    assert applied_artwork is not None
+    assert applied_artwork.sha256 == replacement_art["sha256"]
 
     undone = apply_module.undo_batch(plan.batch_id)
 
     assert undone[0].status == "succeeded"
-    assert read_media(str(source)).artwork.sha256 == original_art["sha256"]
+    restored_artwork = read_media(str(source)).artwork
+    assert restored_artwork is not None
+    assert restored_artwork.sha256 == original_art["sha256"]
 
 
 def test_undo_removes_artwork_when_original_had_none(

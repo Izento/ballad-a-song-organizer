@@ -12,6 +12,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeVar
 
 from .domain.metadata import artwork_to_dict
 from .media import read_front_artwork, read_media, write_tags_to_file
@@ -41,6 +42,7 @@ from .transactions.preflight import (
 )
 
 ProgressCallback = Callable[[str, int, int, ApplyResult | None], None]
+T = TypeVar("T")
 
 
 def _error_details(exc: BaseException) -> tuple[int | None, int | None]:
@@ -64,7 +66,7 @@ def _same_path(left: str, right: str) -> bool:
     return path_key(left) == path_key(right)
 
 
-def _retry_filesystem(operation, attempts: int = 6):
+def _retry_filesystem(operation: Callable[[], T], attempts: int = 6) -> T:
     """Retry past transient Windows sharing violations (winerror 32/33).
 
     Antivirus and search-indexer scans commonly hold a brief lock on a file
@@ -81,7 +83,7 @@ def _retry_filesystem(operation, attempts: int = 6):
             if getattr(exc, "winerror", None) not in {32, 33} or attempt == attempts - 1:
                 raise
             time.sleep(min(0.25 * (2**attempt), 2.0))
-    return None
+    raise RuntimeError("Filesystem operation did not complete.")
 
 
 def _rename_with_retry(source: str, destination: str) -> None:
@@ -198,10 +200,10 @@ def _write_and_verify_tag(item: TagProposal, temporary: Path) -> None:
     media = read_media(str(temporary))
     if not metadata_matches(item.after, media.tags):
         raise ApplyBlocked("Canonical tag verification failed.")
-    if item.artwork_after and (
-        media.artwork is None or media.artwork.get("sha256") != item.artwork_after.get("sha256")
-    ):
-        raise ApplyBlocked("Artwork verification failed.")
+    if item.artwork_after:
+        artwork = media.artwork
+        if artwork is None or artwork.get("sha256") != item.artwork_after.get("sha256"):
+            raise ApplyBlocked("Artwork verification failed.")
 
 
 def _clean_failed_tag(

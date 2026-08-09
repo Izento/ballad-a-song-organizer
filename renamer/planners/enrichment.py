@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import re
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from collections.abc import Iterable
+from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -23,7 +24,7 @@ from ..genre_aliases import normalize_genre_list
 from ..identification import identify
 from ..media import read_media
 from ..media.schema import expected_metadata, metadata_matches
-from ..musicbrainz import enrich_recording
+from ..musicbrainz import EnrichmentResult, enrich_recording
 from ..qualifiers import preserve_local_versions, remove_safe_noise
 from ..quarantine import is_quarantined
 from ..review_models import (
@@ -106,7 +107,7 @@ class IdentifiedFile:
 
 
 def _merge_features(
-    *groups: tuple[str, ...],
+    *groups: Iterable[str],
     include_partial_matches: bool = False,
 ) -> tuple[str, ...]:
     merged: list[str] = []
@@ -490,7 +491,7 @@ def _run_identification(
     results: dict[int, IdentifiedFile | EnrichedFilePlan] = {}
     worker_count = min(_IDENTIFICATION_WORKERS, len(paths))
 
-    def work(index: int, path: str):
+    def work(index: int, path: str) -> tuple[int, IdentifiedFile | EnrichedFilePlan]:
         try:
             return index, _identify_file(
                 index,
@@ -509,7 +510,10 @@ def _run_identification(
             thread_name_prefix="ballad-identify",
         ) as executor,
     ):
-        pending: dict[object, int] = {}
+        pending: dict[
+            Future[tuple[int, IdentifiedFile | EnrichedFilePlan]],
+            int,
+        ] = {}
         next_index = 0
         completed = 0
         while next_index < len(paths) and len(pending) < worker_count:
@@ -558,7 +562,10 @@ def _recording_groups(
     return groups
 
 
-def _enrichment_future_result(future, pending):
+def _enrichment_future_result(
+    future: Future[tuple[str, EnrichmentResult | None]],
+    pending: Iterable[Future[tuple[str, EnrichmentResult | None]]],
+) -> tuple[str, EnrichmentResult | None]:
     """Return one enrichment result, cancelling siblings on failure."""
     try:
         return future.result()
@@ -574,7 +581,7 @@ def _enrich_recordings(
     progress,
     cancel_event,
     recording_enricher,
-) -> dict[str, object | None]:
+) -> dict[str, EnrichmentResult | None]:
     """Fetch each unique recording once with concurrent request preparation."""
     groups = _recording_groups(candidates)
     if not groups:
@@ -583,14 +590,19 @@ def _enrich_recordings(
         (recording_id, grouped[0].path, _local_evidence(grouped))
         for recording_id, grouped in groups.items()
     ]
-    results: dict[str, object | None] = {}
+    results: dict[str, EnrichmentResult | None] = {}
     worker_count = min(_ENRICHMENT_WORKERS, len(tasks))
 
-    def work(recording_id: str, _path: str, local_evidence: dict[str, object]):
-        return recording_id, recording_enricher(
+    def work(
+        recording_id: str,
+        _path: str,
+        local_evidence: dict[str, object],
+    ) -> tuple[str, EnrichmentResult | None]:
+        result = recording_enricher(
             recording_id,
             local_evidence=local_evidence,
         )
+        return recording_id, result
 
     with ThreadPoolExecutor(
         max_workers=worker_count,
@@ -621,7 +633,7 @@ def _enrich_recordings(
 
 def _artwork_requests(
     candidates: list[IdentifiedFile],
-    enrichments: dict[str, object | None],
+    enrichments: dict[str, EnrichmentResult | None],
     include_artwork: bool,
 ) -> dict[str, str]:
     if not include_artwork:
@@ -762,7 +774,7 @@ def _planned_confidence(evidence, enriched, identity_warning, safety_warnings) -
 
 def _plan_identified_file(
     candidate: IdentifiedFile,
-    enriched,
+    enriched: EnrichmentResult | None,
     artwork_by_release: dict[str, dict | None],
 ) -> EnrichedFilePlan:
     path, media, evidence = candidate.path, candidate.media, candidate.evidence
@@ -836,7 +848,7 @@ def _identified_candidates(identified):
 
 def _plans_for_candidates(
     candidates: list[IdentifiedFile],
-    enrichments: dict[str, object | None],
+    enrichments: dict[str, EnrichmentResult | None],
     artwork_by_release: dict[str, dict | None],
     *,
     include_renames: bool,

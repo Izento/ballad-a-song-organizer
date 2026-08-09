@@ -376,8 +376,8 @@ def _auto_detect_track(path: str, ext: str, tags: dict) -> TrackInfo:
 
 def extract_track(
     path: str,
-    strategy: str = None,
-    acoustid_key: str = None,
+    strategy: str | None = None,
+    acoustid_key: str | None = None,
     prefer_acoustid: bool = False,
 ) -> TrackInfo:
     """

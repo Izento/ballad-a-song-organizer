@@ -13,6 +13,7 @@ class Output(Protocol):
 
     def confirm(self, prompt: str) -> bool:
         """Return whether the user approved an action."""
+        ...
 
 
 class ConsoleOutput:

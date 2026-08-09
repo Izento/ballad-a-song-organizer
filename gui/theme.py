@@ -156,11 +156,13 @@ def get_widget_theme_mode(widget: tk.Misc) -> str:
 def apply_theme(root: tk.Misc, mode: str) -> ThemePalette:
     """Apply a palette to existing widgets and shared ttk styles."""
     palette = get_theme_palette(mode)
-    root._ballad_theme_mode = "dark" if mode == "dark" else "light"
+    theme_mode = "dark" if mode == "dark" else "light"
+    # Tk widgets accept application metadata dynamically; tk.Misc does not expose it.
+    setattr(root, "_ballad_theme_mode", theme_mode)  # noqa: B010
     style = ttk.Style(root)
     _use_controllable_theme(style)
     _configure_styles(style, palette)
-    _refresh_widgets(root, palette, root._ballad_theme_mode)
+    _refresh_widgets(root, palette, theme_mode)
     return palette
 
 

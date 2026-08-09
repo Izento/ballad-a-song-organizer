@@ -6,10 +6,11 @@ from pathlib import Path
 from tkinter import messagebox
 
 from gui.presentation import shared_folder_artwork
+from gui.protocols import GuiAppProtocol
 from gui.theme import _SHARED_ARTWORK_PREVIEW_LIMIT
 
 
-class SharedArtworkDialogMixin:
+class SharedArtworkDialogMixin(GuiAppProtocol):
     """Ask before removing artwork that media players share across tracks."""
 
     def _resolve_shared_folder_artwork(self, folder: str) -> tuple[Path, ...] | None:
@@ -42,16 +43,16 @@ class SharedArtworkDialogMixin:
 
     def _remove_shared_artwork(self, artwork: tuple[Path, ...]) -> tuple[Path, ...] | None:
         removed = []
-        try:
-            for path in artwork:
+        for path in artwork:
+            try:
                 path.unlink()
-                removed.append(path)
-        except OSError as exc:
-            messagebox.showerror(
-                "Could not remove shared artwork",
-                f"Ballad could not remove {path.name}:\n\n{exc}",
-            )
-            return None
+            except OSError as exc:
+                messagebox.showerror(
+                    "Could not remove shared artwork",
+                    f"Ballad could not remove {path.name}:\n\n{exc}",
+                )
+                return None
+            removed.append(path)
         return tuple(removed)
 
 

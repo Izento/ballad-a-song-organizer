@@ -186,6 +186,8 @@ def _plan_extracted_track(
         if track_error:
             category = _issue_category_for_track_error(track_error)
             return None, issue(canonical_path(path), category, track_error)
+        if track is None:
+            return None, issue(canonical_path(path), "rename", "No extractable identity")
         return _proposal_for_track(
             path,
             track,

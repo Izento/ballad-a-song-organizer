@@ -66,6 +66,8 @@ def metadata_differences(proposal) -> tuple[tuple[str, object, object], ...]:
 def proposal_evidence(proposal) -> tuple[dict, dict]:
     """Normalize provider evidence from models and plain mappings."""
     evidence = getattr(proposal, "evidence", None)
+    if evidence is None:
+        return {}, {}
     values = evidence.to_dict() if hasattr(evidence, "to_dict") else evidence
     values = values if isinstance(values, dict) else {}
     return values.get("identification") or {}, values.get("musicbrainz") or {}
@@ -138,7 +140,7 @@ def _change_rows(plan: ReviewPlan) -> tuple[DisplayRow, ...]:
 def _change_row(items: list) -> DisplayRow:
     rename = next((item for item in items if hasattr(item, "old_path")), None)
     tag = next((item for item in items if hasattr(item, "before")), None)
-    path = rename.old_path if rename is not None else tag.path
+    path = rename.old_path if rename is not None else tag.path if tag is not None else ""
     statuses = tuple(dict.fromkeys(_proposal_status(item) for item in items))
     status = statuses[0] if len(statuses) == 1 else "mixed"
     return DisplayRow(

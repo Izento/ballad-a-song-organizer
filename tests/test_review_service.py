@@ -101,7 +101,12 @@ def test_online_extraction_pipelines_fingerprints_in_path_order(monkeypatch):
         cancel_event=None,
     )
 
-    assert [extracted[index][0].path for index in range(len(paths))] == paths
+    tracks = []
+    for index in range(len(paths)):
+        track, _error = extracted[index]
+        assert track is not None
+        tracks.append(track)
+    assert [track.path for track in tracks] == paths
     assert len(worker_ids) > 1
     assert len(worker_ids) <= review_api._ONLINE_EXTRACTION_WORKERS
 

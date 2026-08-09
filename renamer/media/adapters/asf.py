@@ -120,7 +120,8 @@ def write(
     *,
     replace_artwork: bool = False,
 ) -> None:
-    from mutagen.asf import ASF, ASFByteArrayAttribute, ASFUnicodeAttribute
+    from mutagen.asf import ASF
+    from mutagen.asf._attrs import ASFByteArrayAttribute, ASFUnicodeAttribute
 
     audio = ASF(path)
     replace_artwork = replace_artwork or image is not None

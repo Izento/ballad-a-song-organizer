@@ -7,12 +7,13 @@ from pathlib import Path
 from tkinter import messagebox, ttk
 
 from gui.presentation import format_local_timestamp
+from gui.protocols import GuiAppProtocol
 from gui.theme import apply_theme, get_widget_theme_mode
 from renamer.apply import batch_history, undo_batch
 from renamer.review_models import path_key
 
 
-class HistoryDialogMixin:
+class HistoryDialogMixin(GuiAppProtocol):
     """Browse durable apply history and restore whole or selected groups."""
 
     def _show_history(self) -> None:

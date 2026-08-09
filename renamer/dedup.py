@@ -9,9 +9,10 @@ from __future__ import annotations
 
 import hashlib
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .filename_parser import RegularName, normalize_text, parse_regular_stem
 from .fingerprint import fingerprint_file
@@ -25,7 +26,7 @@ from .track_identity import TrackIdentity
 class RegularTrack:
     path: str
     name: RegularName | None
-    tags: dict[str, str]
+    tags: Mapping[str, Any]
     duration: float | None
     bitrate: int | None
     sha256: str | None
@@ -97,6 +98,7 @@ def collect_tracks(
         fingerprint_error = ""
         if fingerprint and digest is not None:
             audio_fingerprint, fingerprint_error = fingerprint_file(path)
+            fingerprint_error = fingerprint_error or ""
         tracks.append(
             RegularTrack(
                 path=path,

@@ -7,12 +7,13 @@ from pathlib import Path
 from tkinter import ttk
 
 from gui.presentation import format_local_timestamp
+from gui.protocols import GuiAppProtocol
 from gui.theme import apply_theme, get_widget_theme_mode
 from renamer.quarantine import load_quarantine, unquarantine_files
 from renamer.review_models import path_key
 
 
-class QuarantineDialogMixin:
+class QuarantineDialogMixin(GuiAppProtocol):
     """Show persisted ignored matches and allow a user to restore them."""
 
     def _show_quarantine_manager(self) -> None:

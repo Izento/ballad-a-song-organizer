@@ -9,10 +9,11 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox
 
+from gui.protocols import GuiAppProtocol
 from gui.theme import get_theme_palette
 
 
-class ContextMenuMixin:
+class ContextMenuMixin(GuiAppProtocol):
     """Expose playback, file location, evidence, and quarantine actions."""
 
     def _handle_tree_context_menu(self, tree_name: str, event):

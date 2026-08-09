@@ -6,11 +6,12 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Any
 
+from gui.protocols import GuiAppProtocol
 from gui.theme import _ACTIVITY_COLLAPSED_WIDTH, _ACTIVITY_SIDEBAR_WIDTH
 from gui.widgets.tooltip import _add_tooltip
 
 
-class ActivitySidebarMixin:
+class ActivitySidebarMixin(GuiAppProtocol):
     """Build and control the collapsible review sidebar."""
 
     def _build_activity_sidebar(self, parent: ttk.Frame) -> None:

@@ -40,7 +40,8 @@ def _violations(path: Path) -> list[str]:
     for node in ast.walk(tree):
         if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             continue
-        length = node.end_lineno - node.lineno + 1
+        end_lineno = node.end_lineno or node.lineno
+        length = end_lineno - node.lineno + 1
         depth = _nested_depth(node)
         location = f"{path}:{node.lineno} {node.name}"
         if length > MAX_FUNCTION_LINES:

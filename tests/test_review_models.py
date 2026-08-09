@@ -65,7 +65,8 @@ def test_review_metadata_and_evidence_are_deeply_immutable(tmp_path):
     assert proposal.after == {"artist": "Artist", "genre": ["House"]}
     assert proposal.evidence == {"provider": {"ids": ["recording"]}}
     with pytest.raises(TypeError):
-        proposal.after["artist"] = "Nope"
+        # Intentional mutation attempt: the runtime assertion verifies immutability.
+        proposal.after["artist"] = "Nope"  # pyright: ignore[reportIndexIssue]
 
 
 def test_schema_two_plan_has_stable_serialized_shape():

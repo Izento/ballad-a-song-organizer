@@ -30,7 +30,7 @@ class StrategyRecommendation:
 
 
 def infer_strategy(samples: list[StrategySample]) -> StrategyRecommendation:
-    counts = dict.fromkeys(_COUNT_KEYS, 0)
+    counts: dict[str, int] = {key: 0 for key in _COUNT_KEYS}
     for sample in samples:
         strategy = sample.extraction_strategy
         if strategy == "ocremix_tagged":

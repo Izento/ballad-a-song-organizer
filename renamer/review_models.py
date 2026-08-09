@@ -7,9 +7,10 @@ import json
 import os
 import unicodedata
 import uuid
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .domain.evidence import Evidence
 from .domain.issues import ReviewIssue, apply_eligible, proposal_issues, requires_review
@@ -74,12 +75,25 @@ class FileSnapshot:
             ),
         )
 
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            path: str,
+            file_id: str | None,
+            size: int,
+            mtime_ns: int,
+            tags: CanonicalMetadata | Mapping[str, Any] | None = None,
+            artwork: ArtworkDescriptor | Mapping[str, Any] | None = None,
+            sha256: str | None = None,
+        ) -> None: ...
+
     @classmethod
     def capture(
         cls,
         path: str,
-        tags: dict[str, Any] | None = None,
-        artwork: dict[str, Any] | None = None,
+        tags: Mapping[str, Any] | None = None,
+        artwork: ArtworkDescriptor | Mapping[str, Any] | None = None,
         include_hash: bool = False,
     ) -> FileSnapshot:
         stat = os.stat(path)
@@ -171,6 +185,25 @@ class RenameProposal:
                 proposal_issues(self.warnings),
             )
 
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            id: str,
+            decision_group_id: str,
+            snapshot: FileSnapshot,
+            old_path: str,
+            new_path: str,
+            current_values: CanonicalMetadata | Mapping[str, Any],
+            proposed_values: CanonicalMetadata | Mapping[str, Any],
+            confidence: str,
+            reason: str,
+            warnings: tuple[str, ...] = (),
+            status: str = "pending",
+            evidence: Evidence | Mapping[str, Any] | None = None,
+            review_issues: tuple[ReviewIssue, ...] = (),
+        ) -> None: ...
+
     @property
     def requires_review(self) -> bool:
         return requires_review(self.review_issues)
@@ -247,6 +280,26 @@ class TagProposal:
                 proposal_issues(self.warnings),
             )
 
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            id: str,
+            decision_group_id: str,
+            snapshot: FileSnapshot,
+            path: str,
+            before: CanonicalMetadata | Mapping[str, Any],
+            after: CanonicalMetadata | Mapping[str, Any],
+            confidence: str,
+            reason: str,
+            warnings: tuple[str, ...] = (),
+            status: str = "pending",
+            artwork_before: ArtworkDescriptor | Mapping[str, Any] | None = None,
+            artwork_after: StagedArtwork | Mapping[str, Any] | None = None,
+            evidence: Evidence | Mapping[str, Any] | None = None,
+            review_issues: tuple[ReviewIssue, ...] = (),
+        ) -> None: ...
+
     @property
     def requires_review(self) -> bool:
         return requires_review(self.review_issues)
@@ -286,6 +339,19 @@ class DuplicateFinding:
     def __post_init__(self) -> None:
         object.__setattr__(self, "paths", tuple(self.paths))
         object.__setattr__(self, "evidence", Evidence.coerce(self.evidence))
+
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            id: str,
+            paths: tuple[str, ...],
+            classification: str,
+            recommendation: str,
+            evidence: Evidence | Mapping[str, Any],
+            confidence: str,
+            status: str = "read_only",
+        ) -> None: ...
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -331,7 +397,7 @@ class ReviewPlan:
         rename_proposals: list[RenameProposal] | tuple[RenameProposal, ...] = (),
         tag_proposals: list[TagProposal] | tuple[TagProposal, ...] = (),
         duplicate_findings: list[DuplicateFinding] | tuple[DuplicateFinding, ...] = (),
-        issues: list[dict[str, Any] | ReviewIssue] | tuple[dict[str, Any] | ReviewIssue, ...] = (),
+        issues: Sequence[dict[str, Any] | ReviewIssue] = (),
     ) -> ReviewPlan:
         plan = cls(
             batch_id=uuid.uuid4().hex,

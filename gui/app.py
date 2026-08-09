@@ -7,6 +7,7 @@ import tkinter as tk
 from contextlib import suppress
 from pathlib import Path
 from tkinter import messagebox, ttk
+from typing import Any
 
 from gui.controllers.actions import ActionControllerMixin
 from gui.controllers.context_menu import ContextMenuMixin
@@ -92,6 +93,9 @@ class SongOrganizerApp(
         self.root.protocol("WM_DELETE_WINDOW", self._close)
         self.root.after(100, self._poll_events)
 
+    def __getattr__(self, name: str) -> Any:
+        raise AttributeError(name)
+
     def _initialize_session(self) -> None:
         self.jobs = BackgroundJobs()
         self.events = self.jobs.events
@@ -106,7 +110,7 @@ class SongOrganizerApp(
         self.musicbrainz_available = musicbrainz_available()
         self._set_capability_text(fpcalc_path)
 
-    def _set_capability_text(self, fpcalc_path: Path | None) -> None:
+    def _set_capability_text(self, fpcalc_path: str | None) -> None:
         fpcalc_state = "available" if fpcalc_path else "not installed (optional)"
         online_state = (
             "ready"

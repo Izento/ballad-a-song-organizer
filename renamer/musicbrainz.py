@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import re
 import threading
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from difflib import SequenceMatcher
 from typing import TYPE_CHECKING
@@ -57,6 +58,19 @@ class EnrichmentResult:
         object.__setattr__(self, "confidence", Confidence(self.confidence))
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "provenance", tuple(self.provenance))
+
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            recording_id: str,
+            values: CanonicalMetadata | Mapping[str, object] | None = None,
+            release_id: str = "",
+            release_group_id: str = "",
+            confidence: Confidence | str = Confidence.LOW,
+            warnings: Iterable[str] = (),
+            provenance: Iterable[str] = (),
+        ) -> None: ...
 
     def to_dict(self) -> dict[str, object]:
         return {

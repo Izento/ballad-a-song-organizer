@@ -88,21 +88,25 @@ def write(
 
     audio = MP4(path)
     replace_artwork = replace_artwork or image is not None
-    if audio.tags is None:
+    tags = audio.tags
+    if tags is None:
         audio.add_tags()
+        tags = audio.tags
+    if tags is None:
+        raise RuntimeError("Mutagen could not initialize MP4 tags.")
     for field in FIELDS:
         if field.canonical not in values:
             continue
         target = _target(field)
         entries = value_list(values[field.canonical])
         if entries:
-            audio.tags[target] = (
+            tags[target] = (
                 [entry.encode("utf-8") for entry in entries]
                 if target.startswith(_FREEFORM_PREFIX)
                 else entries
             )
         else:
-            audio.tags.pop(target, None)
+            tags.pop(target, None)
 
     for atom, number_key, total_key in (
         ("trkn", "tracknumber", "tracktotal"),
@@ -112,14 +116,14 @@ def write(
             continue
         number, _unused = split_pair(values.get(number_key))
         total, _unused_total = split_pair(values.get(total_key))
-        audio.tags[atom] = [(int(number or 0), int(total or 0))]
+        tags[atom] = [(int(number or 0), int(total or 0))]
 
     if replace_artwork:
-        audio.tags.pop("covr", None)
+        tags.pop("covr", None)
     if image:
         data, mime_type = image
         image_format = MP4Cover.FORMAT_PNG if mime_type == "image/png" else MP4Cover.FORMAT_JPEG
-        audio.tags["covr"] = [MP4Cover(data, imageformat=image_format)]
+        tags["covr"] = [MP4Cover(data, imageformat=image_format)]
     audio.save()
 
 

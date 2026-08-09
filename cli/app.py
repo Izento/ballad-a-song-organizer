@@ -23,8 +23,9 @@ _COMMAND_MODULES = {
 
 def _configure_utf8_console() -> None:
     for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="replace")
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            reconfigure(encoding="utf-8", errors="replace")
 
 
 def _load_local_environment() -> None:

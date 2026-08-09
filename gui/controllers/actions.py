@@ -9,6 +9,7 @@ from typing import Any
 
 from gui.dialogs.filename_edit import _ask_filename
 from gui.presentation import filename_validation_error
+from gui.protocols import GuiAppProtocol
 from renamer.apply import batches_requiring_recovery, latest_undoable_batch
 from renamer.domain.issues import ReviewIssue
 from renamer.proposal_selection import action_items, grouped_action_ids
@@ -17,7 +18,7 @@ from renamer.review_models import canonical_path, path_key, proposal_id
 from renamer.review_service import coordinate_tag_proposals, refresh_rename_readiness
 
 
-class ActionControllerMixin:
+class ActionControllerMixin(GuiAppProtocol):
     """Start safe background work and manage user-approved proposal changes."""
 
     def _browse(self) -> None:

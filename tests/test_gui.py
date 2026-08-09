@@ -48,7 +48,9 @@ def test_organize_worker_only_analyzes_and_never_applies(tmp_path, monkeypatch):
         acoustid_key=None,
         include_artwork=True,
     )
-    jobs.worker.join(timeout=2)
+    worker = jobs.worker
+    assert worker is not None
+    worker.join(timeout=2)
 
     assert calls["enrich_metadata"]
     assert calls["include_duplicates"]
@@ -99,7 +101,9 @@ def test_organize_worker_does_not_apply_even_high_confidence_proposals(
         acoustid_key=None,
         include_artwork=True,
     )
-    jobs.worker.join(timeout=2)
+    worker = jobs.worker
+    assert worker is not None
+    worker.join(timeout=2)
 
     assert applied == []
     event = jobs.events.get_nowait()
@@ -125,7 +129,9 @@ def test_worker_cancel_uses_current_operation_token(tmp_path, monkeypatch):
     )
 
     jobs.cancel()
-    jobs.worker.join(timeout=2)
+    worker = jobs.worker
+    assert worker is not None
+    worker.join(timeout=2)
 
     assert observed[0].is_set()
     assert jobs.events.get_nowait()[0] == "organize-complete"
@@ -149,7 +155,9 @@ def test_duplicate_worker_emits_recycle_completion_event(tmp_path, monkeypatch):
     jobs = BackgroundJobs()
 
     jobs.remove_duplicates([(finding, (str(first),))])
-    jobs.worker.join(timeout=2)
+    worker = jobs.worker
+    assert worker is not None
+    worker.join(timeout=2)
 
     assert jobs.events.get_nowait() == ("duplicate-remove-complete", [result])
 

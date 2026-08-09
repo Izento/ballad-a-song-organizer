@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tkinter as tk
 
+from gui.protocols import GuiAppProtocol
 from gui.theme import _FIXED_TREE_COLUMNS, _SHIFT_MASK
 from renamer.proposal_selection import (
     action_items,
@@ -15,7 +16,7 @@ from renamer.proposal_selection import (
 )
 
 
-class SelectionControllerMixin:
+class SelectionControllerMixin(GuiAppProtocol):
     """Coordinate song-group and component-level review choices."""
 
     def _proposal_for_id(self, item_id: str):

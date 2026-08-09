@@ -1,6 +1,7 @@
 # pylint: disable=import-error,protected-access
 
 from types import SimpleNamespace
+from typing import Any
 
 from gui import app as gui_app
 from gui.app import SongOrganizerApp
@@ -29,8 +30,8 @@ def test_version_qualifier_conflict_requires_manual_review():
     assert requires_review(proposal)
 
 
-def _bare_app(plan=None) -> SongOrganizerApp:
-    app = SongOrganizerApp.__new__(SongOrganizerApp)
+def _bare_app(plan=None) -> Any:
+    app: Any = SongOrganizerApp.__new__(SongOrganizerApp)
     app.session = ReviewSession(plan=plan)
     return app
 
@@ -499,6 +500,7 @@ def test_right_click_file_opens_context_menu_for_exact_path(monkeypatch, fake_tr
 
         def tk_popup(self, x, y):
             assert (x, y) == (40, 50)
+            assert self.command is not None
             self.command()
 
     monkeypatch.setattr(gui_app.tk, "Menu", _FakeMenu)

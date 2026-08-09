@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import messagebox
 
 from gui.presentation import format_progress_log
+from gui.protocols import GuiAppProtocol
 from renamer.proposal_selection import (
     action_items,
     grouped_action_ids,
@@ -15,7 +16,7 @@ from renamer.proposal_selection import (
 )
 
 
-class EventControllerMixin:
+class EventControllerMixin(GuiAppProtocol):
     """Dispatch worker events without coupling workers to Tk widgets."""
 
     def _poll_events(self) -> None:

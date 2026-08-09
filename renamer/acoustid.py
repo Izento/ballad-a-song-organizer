@@ -35,13 +35,15 @@ _CACHE_STATE = _CacheState()
 
 def _load_cache() -> dict:
     with _CACHE_LOCK:
-        if _CACHE_STATE.entries is None:
+        entries = _CACHE_STATE.entries
+        if entries is None:
             try:
                 with open(_CACHE_PATH, encoding="utf-8") as fh:
-                    _CACHE_STATE.entries = json.load(fh)
+                    entries = json.load(fh)
             except (FileNotFoundError, json.JSONDecodeError):
-                _CACHE_STATE.entries = {}
-        return _CACHE_STATE.entries
+                entries = {}
+            _CACHE_STATE.entries = entries
+        return entries
 
 
 def _save_cache() -> None:

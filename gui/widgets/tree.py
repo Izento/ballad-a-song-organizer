@@ -7,6 +7,7 @@ from pathlib import Path
 from tkinter import ttk
 
 from gui.presentation import plan_rows
+from gui.protocols import GuiAppProtocol
 from gui.theme import (
     _CONFIDENCE_ROW_STYLES,
     _FIXED_TREE_COLUMNS,
@@ -16,7 +17,7 @@ from gui.theme import (
 from renamer.review_models import ReviewPlan
 
 
-class TreeMixin:
+class TreeMixin(GuiAppProtocol):
     """Render and maintain the plan's review-table rows."""
 
     def _tree_spec(self, key: str) -> tuple[tuple[str, ...], dict, dict]:

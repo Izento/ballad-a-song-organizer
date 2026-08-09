@@ -18,11 +18,12 @@ def plan_tag_updates(
     recursive: bool = True,
     progress: Callable[[str, int, int, str], None] | None = None,
     cancel_event=None,
-):
+) -> tuple[list[TagProposal], list[ReviewIssue]]:
     """Plan tag repairs implied by supported filenames."""
 
     def audit_progress(current: int, total: int, path: str) -> None:
-        progress("tag-audit", current, total, path)
+        if progress is not None:
+            progress("tag-audit", current, total, path)
 
     return audit_tags_for_folder(
         folder_path,
@@ -113,11 +114,11 @@ def audit_tags_for_folder(
     recursive: bool = True,
     progress: Callable[[int, int, str], None] | None = None,
     cancel_event=None,
-) -> tuple[list[TagProposal], list[dict]]:
+) -> tuple[list[TagProposal], list[ReviewIssue]]:
     from .track_extraction import scan_folder
 
     proposals: list[TagProposal] = []
-    issues: list[dict] = []
+    issues: list[ReviewIssue] = []
     paths = scan_folder(folder_path, recursive=recursive)
     for index, path in enumerate(paths, start=1):
         if cancel_event is not None and cancel_event.is_set():
@@ -128,15 +129,17 @@ def audit_tags_for_folder(
                 proposals.append(proposal)
         except (OSError, ValueError) as exc:
             issues.append(
-                {
-                    "path": os.path.abspath(path),
-                    "category": "tag-audit",
-                    "message": str(exc),
-                }
+                ReviewIssue.from_dict(
+                    {
+                        "path": os.path.abspath(path),
+                        "category": "tag-audit",
+                        "message": str(exc),
+                    }
+                )
             )
         if progress:
             progress(index, len(paths), path)
-    return proposals, [ReviewIssue.from_dict(issue) for issue in issues]
+    return proposals, issues
 
 
 __all__ = [

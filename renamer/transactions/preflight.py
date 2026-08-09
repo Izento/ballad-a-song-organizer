@@ -67,8 +67,11 @@ def _validate_rename_source(item: RenameProposal, block) -> None:
 
 
 def _validate_staged_artwork(item: TagProposal, block) -> None:
+    artwork_after = item.artwork_after
+    if artwork_after is None:
+        return
     try:
-        artwork = ArtworkRef(**item.artwork_after.to_dict())
+        artwork = ArtworkRef(**artwork_after.to_dict())
     except (TypeError, ValueError) as exc:
         block(item.id, item.path, f"Invalid staged artwork: {exc}")
         return

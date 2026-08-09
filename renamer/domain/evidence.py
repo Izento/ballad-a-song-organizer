@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 
 class Confidence(StrEnum):
@@ -128,6 +128,20 @@ class RecordingIdentity:
         object.__setattr__(self, "warnings", tuple(self.warnings))
         object.__setattr__(self, "provenance", tuple(self.provenance))
 
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            artist: str = "",
+            title: str = "",
+            exact_recording_id: str = "",
+            derived_from_recording_id: str = "",
+            acoustid_score: float | None = None,
+            confidence: Confidence | str = Confidence.UNRESOLVED,
+            warnings: Iterable[str] = (),
+            provenance: Iterable[IdentitySource | str] = (),
+        ) -> None: ...
+
     @property
     def resolved_recording_id(self) -> str:
         return self.exact_recording_id or self.derived_from_recording_id
@@ -188,6 +202,32 @@ class ExtractedTrack:
         object.__setattr__(self, "feat_artists", tuple(self.feat_artists))
         object.__setattr__(self, "remixers", tuple(self.remixers))
         object.__setattr__(self, "strategy", ExtractionStrategy(self.strategy))
+
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            path: str,
+            ext: str,
+            artist: str = "",
+            title: str = "",
+            feat_artists: Iterable[str] = (),
+            is_ocremix: bool = False,
+            game: str = "",
+            remixers: Iterable[str] = (),
+            strategy: ExtractionStrategy | str = ExtractionStrategy.UNKNOWN,
+            needs_lookup: bool = False,
+            skip_reason: str = "",
+            mb_album: str = "",
+            mb_track_num: int = 0,
+            duration: float | None = None,
+            bitrate: int | None = None,
+            acoustid_score: float | None = None,
+            acoustid_recording_id: str = "",
+            exact_recording_id: str = "",
+            derived_from_recording_id: str = "",
+            version_warning: str = "",
+        ) -> None: ...
 
 
 __all__ = [

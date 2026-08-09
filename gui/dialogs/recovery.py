@@ -4,10 +4,11 @@ from __future__ import annotations
 
 from tkinter import messagebox
 
+from gui.protocols import GuiAppProtocol
 from renamer.review_models import path_key
 
 
-class RecoveryDialogMixin:
+class RecoveryDialogMixin(GuiAppProtocol):
     """Remember explicitly confirmed recovery overrides per library root."""
 
     def _confirm_recovery_override(self, pending: list[dict], root: str) -> bool:

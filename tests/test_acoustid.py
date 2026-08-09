@@ -56,6 +56,7 @@ def test_lookup_uses_precomputed_fingerprint(monkeypatch):
     monkeypatch.setattr(acoustid, "_file_key", lambda path: "test-key")
 
     result = acoustid.lookup("song.mp3", "api-key")
+    assert result is not None
 
     assert result["artist"] == "Artist"
     assert result["title"] == "Track title"
@@ -112,6 +113,7 @@ def test_lookup_selects_most_supported_recording(monkeypatch):
         "song.mp3",
         "api-key",
     )
+    assert result is not None
 
     assert result["recording_id"] == "correct-recording"
     assert result["title"] == "Build You Up"
@@ -170,6 +172,7 @@ def test_lookup_prefers_exact_filename_title_in_conflicting_match(monkeypatch):
         "2Pac - Troublesome.mp3",
         "api-key",
     )
+    assert result is not None
 
     assert result["recording_id"] == "correct-recording"
     assert result["title"] == "Troublesome"

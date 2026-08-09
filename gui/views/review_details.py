@@ -13,6 +13,7 @@ from typing import Any
 from PIL import Image, ImageTk
 
 from gui.presentation import metadata_differences, proposal_evidence
+from gui.protocols import GuiAppProtocol
 from gui.theme import confidence_style
 from renamer.media import read_front_artwork
 
@@ -28,7 +29,7 @@ def _short_identifier(value: object) -> str:
     return text if len(text) <= 16 else f"{text[:12]}…"
 
 
-class ReviewDetailsMixin:
+class ReviewDetailsMixin(GuiAppProtocol):
     """Show one proposal's metadata, evidence, and cover art."""
 
     def _on_tree_select(self, tree_name: str, _event=None) -> None:

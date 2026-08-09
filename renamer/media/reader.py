@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..domain.metadata import ArtworkDescriptor, CanonicalMetadata
 from .adapters import asf, id3, mp4, vorbis
@@ -31,6 +32,20 @@ class MediaRead:
                 else ArtworkDescriptor.from_dict(self.artwork)
             ),
         )
+
+    if TYPE_CHECKING:
+
+        def __init__(  # noqa: PLR0917
+            self,
+            path: str,
+            status: str,
+            container: str = "",
+            tags: CanonicalMetadata | Mapping[str, Any] | None = None,
+            artwork: ArtworkDescriptor | Mapping[str, Any] | None = None,
+            duration: float | None = None,
+            bitrate: int | None = None,
+            error: str = "",
+        ) -> None: ...
 
     @property
     def usable(self) -> bool:
