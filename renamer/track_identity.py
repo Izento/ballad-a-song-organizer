@@ -40,6 +40,11 @@ _GENERIC_IDENTITY_TOKENS = frozenset(
 _PLACEHOLDER_ARTISTS = frozenset(
     {"no artist", "unknown", "unknown artist", "various artists", "va"}
 )
+_PLACEHOLDER_TEXT_RE = re.compile(
+    r"^(?:audio(?:\s+track)?|track\s*\d+|title|unknown(?:\s+(?:artist|title))?|"
+    r"untitled|\d+)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -167,6 +172,36 @@ def _substantially_survives_in(evidence: str, proposal: str) -> bool:
     return bool(squashed) and squashed in _squashed(proposal)
 
 
+def has_non_latin_text(value: str) -> bool:
+    """Return whether alphabetic text contains a non-Latin script."""
+    return any(
+        character.isalpha() and "LATIN" not in unicodedata.name(character, "")
+        for character in str(value or "")
+    )
+
+
+def is_placeholder_text(value: str) -> bool:
+    """Return whether a value is too generic to preserve as display identity."""
+    normalized = normalize_text(str(value or ""))
+    return not normalized or bool(_PLACEHOLDER_TEXT_RE.fullmatch(normalized))
+
+
+def prefer_latin_text(local: str, online: str) -> str:
+    """Prefer meaningful local Latin text over a non-Latin online variant."""
+    local_text = str(local or "").strip()
+    online_text = str(online or "").strip()
+    if not online_text:
+        return local_text
+    if (
+        local_text
+        and not is_placeholder_text(local_text)
+        and not has_non_latin_text(local_text)
+        and has_non_latin_text(online_text)
+    ):
+        return local_text
+    return online_text
+
+
 def identity_is_recognizable(
     *,
     local_artist: str,
@@ -260,9 +295,12 @@ __all__ = [
     "VersionResolution",
     "TrackIdentity",
     "artist_appears_in",
+    "has_non_latin_text",
     "filename_identity_hint",
     "identity_is_recognizable",
+    "is_placeholder_text",
     "is_placeholder_artist",
+    "prefer_latin_text",
     "parse_filename_identity",
     "reconcile_online_version",
 ]

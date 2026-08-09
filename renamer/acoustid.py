@@ -11,7 +11,7 @@ from .filename_parser import normalize_text
 from .fingerprint import fingerprint_file_details
 from .online import Provider, ProviderError, RateLimiter, RequestPolicy
 from .runtime import app_paths, atomic_write_json, resolve_fpcalc
-from .track_identity import filename_identity_hint
+from .track_identity import filename_identity_hint, has_non_latin_text
 
 _CACHE_PATH = str(app_paths()["cache"] / "acoustid_cache.json")
 _CACHE_LOCK = threading.RLock()
@@ -21,7 +21,7 @@ _REQUEST_POLICY = RequestPolicy(
 )
 
 MIN_CONFIDENCE = 0.70
-_CACHE_VERSION = 3
+_CACHE_VERSION = 4
 
 
 @dataclass
@@ -116,6 +116,20 @@ def _recording_artist(recording: dict) -> str | None:
     return "".join(artist.get("name", "") + artist.get("joinphrase", "") for artist in artists)
 
 
+def _recording_rank(
+    recording: dict,
+    filename_hint: tuple[str, str],
+) -> tuple[int, int, int, int]:
+    artist = _recording_artist(recording) or ""
+    title = str(recording.get("title") or "")
+    identity_score = _identity_similarity(filename_hint, artist, title)
+    latin_score = int(not has_non_latin_text(artist)) + int(not has_non_latin_text(title))
+    exact_title = int(
+        bool(filename_hint[1]) and normalize_text(title) == normalize_text(filename_hint[1])
+    )
+    return identity_score, latin_score, exact_title, _source_count(recording)
+
+
 def _select_recording(response: dict, path: str) -> tuple[float, dict] | None:
     """Choose a supported recording from the strongest acoustic match.
 
@@ -152,19 +166,17 @@ def _select_recording(response: dict, path: str) -> tuple[float, dict] | None:
         ]
         recordings = [
             (
-                _source_count(recording),
-                _identity_similarity(filename_hint, artist, title),
-                normalize_text(title) == normalize_text(filename_hint[1]),
+                _recording_rank(recording, filename_hint),
                 recording,
             )
             for result in top_results
             for recording in result.get("recordings", ())
-            if (title := recording.get("title")) and (artist := _recording_artist(recording))
+            if recording.get("title") and _recording_artist(recording)
         ]
         if recordings:
-            exact_title_matches = [recording for recording in recordings if recording[2]]
+            exact_title_matches = [recording for recording in recordings if recording[0][2]]
             choices = exact_title_matches or recordings
-            _, _, _, recording = max(choices, key=lambda value: value[:2])
+            _, recording = max(choices, key=lambda value: value[0])
             return score, recording
     return None
 

@@ -64,6 +64,57 @@ def test_metadata_enrichment_coordinates_filename_and_tags(tmp_path, monkeypatch
     assert tags[0].after["musicbrainz_recordingid"] == "recording"
 
 
+def test_metadata_enrichment_preserves_local_latin_identity(tmp_path, monkeypatch):
+    source = tmp_path / "Artist - English Song.mp3"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(
+        review_api,
+        "read_media",
+        lambda path: MediaRead(
+            path=path,
+            status="ok",
+            container="MP3",
+            tags={"artist": "Artist", "title": "Old Tag"},
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "identify",
+        lambda *_args, **_kwargs: RecordingEvidence(
+            exact_recording_id="recording",
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "enrich_recording",
+        lambda *_args, **_kwargs: EnrichmentResult(
+            recording_id="recording",
+            values={
+                "artist": "日本のアーティスト",
+                "title": "日本語の曲",
+                "album": "日本のアルバム",
+                "musicbrainz_recordingid": "recording",
+            },
+            release_id="release",
+            confidence="high",
+        ),
+    )
+
+    renames, tags, issues = review_api.plan_metadata_enrichment(
+        str(tmp_path),
+        recursive=False,
+        include_artwork=False,
+    )
+
+    assert issues == []
+    assert renames == []
+    assert len(tags) == 1
+    assert tags[0].after["artist"] == "Artist"
+    assert tags[0].after["title"] == "English Song"
+    assert tags[0].after["album"] == "日本のアルバム"
+
+
 def test_ocremix_enrichment_preserves_game_title_and_records_remixer(
     tmp_path,
     monkeypatch,

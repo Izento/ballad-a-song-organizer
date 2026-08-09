@@ -49,6 +49,7 @@ from ..track_identity import (
     filename_identity_hint,
     identity_is_recognizable,
     is_placeholder_artist,
+    prefer_latin_text,
 )
 from .progress import ProgressCallback, emit, issue
 from .readiness import refresh_rename_readiness
@@ -227,6 +228,21 @@ def _title_with_features(title: str, features: tuple[str, ...]) -> str:
     return f"{clean_title} (feat. {', '.join(merged)})"
 
 
+def _prefer_local_latin_values(values: dict, filename, media) -> dict:
+    """Keep meaningful local Latin display fields over non-Latin online text."""
+    local_values = {
+        "artist": filename.artist if filename is not None else media.tags.get("artist", ""),
+        "title": filename.title if filename is not None else media.tags.get("title", ""),
+        "album": media.tags.get("album", ""),
+        "album_artist": media.tags.get("album_artist", ""),
+    }
+    for field, local in local_values.items():
+        online = str(values.get(field) or "")
+        if online:
+            values[field] = prefer_latin_text(str(local or ""), online)
+    return values
+
+
 def _local_feature_names(
     filename,
     media,
@@ -311,6 +327,7 @@ def _enriched_values(path, media, evidence, enriched):
 
     values = dict(enriched.values)
     filename = parse_regular_filename(Path(path).name)
+    values = _prefer_local_latin_values(values, filename, media)
     local_title = filename.title if filename is not None else media.tags.get("title", "")
     if values.get("title"):
         online_title = preserve_local_versions(

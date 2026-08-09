@@ -7,12 +7,13 @@ from dataclasses import replace
 from .domain.evidence import ExtractedTrack
 from .filename_builder import split_feat, strip_ocremix_remixer, strip_ocremix_suffix
 from .filename_parser import (
+    normalize_text,
     normalize_title_text,
     parse_regular_stem,
 )
 from .media import read_media
 from .media.legacy_filename import parse_stem
-from .track_identity import reconcile_online_version
+from .track_identity import filename_identity_hint, prefer_latin_text, reconcile_online_version
 
 AUDIO_EXTENSIONS = {
     ".mp3",
@@ -316,17 +317,74 @@ def _from_acoustid(path: str, ext: str, api_key: str) -> "TrackInfo | None":
     result = lookup(path, api_key)
     if not result:
         return None
+    ocremix_track = _ocremix_from_acoustid(path, ext, result)
+    if ocremix_track is not None:
+        return ocremix_track
+    hint = filename_identity_hint(path) or ("", "")
     track = TrackInfo(
         path=path,
         ext=ext,
-        artist=result["artist"],
-        title=result["title"],
+        artist=prefer_latin_text(hint[0], result["artist"]),
+        title=prefer_latin_text(hint[1], result["title"]),
         feat_artists=result["feat_artists"],
         strategy="acoustid",
         acoustid_score=result.get("score"),
         acoustid_recording_id=result.get("recording_id", ""),
     )
     return _preserve_filename_version_qualifiers(path, track)
+
+
+def _merge_ocremix_names(*groups: object) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        values = group if isinstance(group, (list, tuple, set, frozenset)) else (group,)
+        for value in values:
+            name = normalize_title_text(str(value or ""))
+            key = normalize_text(name)
+            if name and key not in seen:
+                names.append(name)
+                seen.add(key)
+    return tuple(names)
+
+
+def _ocremix_from_acoustid(path: str, ext: str, result: dict) -> TrackInfo | None:
+    """Keep an online OC ReMix match in the game-first naming model."""
+    stem = os.path.splitext(os.path.basename(path))[0]
+    parsed = parse_stem(stem)
+    if parsed is not None and parsed["is_ocremix"]:
+        game = parsed["game"]
+        title = parsed["title"]
+        remixers = parsed["remixers"]
+    else:
+        provider_title = str(result.get("title") or "")
+        if not re.search(r"\boc\s*remix\b", normalize_text(provider_title)):
+            return None
+        tags = _read_tags(path)
+        local = _auto_detect_track(path, ext, tags)
+        if not local.is_ocremix or not local.game or not local.title:
+            return None
+        game = local.game
+        title = local.title
+        remixers = local.remixers
+
+    provider_artist = str(result.get("artist") or "")
+    provider_remixers = (
+        _split_ocremix_artists(provider_artist)
+        if normalize_text(provider_artist) != normalize_text(game)
+        else []
+    )
+    return TrackInfo(
+        path=path,
+        ext=ext,
+        is_ocremix=True,
+        game=game,
+        title=title,
+        remixers=_merge_ocremix_names(remixers, provider_remixers),
+        strategy="acoustid",
+        acoustid_score=result.get("score"),
+        acoustid_recording_id=result.get("recording_id", ""),
+    )
 
 
 def _preserve_filename_version_qualifiers(path: str, track: TrackInfo) -> TrackInfo:

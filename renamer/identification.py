@@ -7,14 +7,21 @@ from pathlib import Path
 
 from .domain.evidence import RecordingIdentity
 from .online.cache import enrichment_cache
-from .track_identity import filename_identity_hint, reconcile_online_version
+from .track_identity import (
+    filename_identity_hint,
+    prefer_latin_text,
+    reconcile_online_version,
+)
 
 RecordingEvidence = RecordingIdentity
+_IDENTIFICATION_CACHE_VERSION = 2
 
 
 def _cache_key(path: str) -> str:
     stat = Path(path).stat()
-    return f"{Path(path).resolve()}|{stat.st_mtime_ns}|{stat.st_size}"
+    return (
+        f"v{_IDENTIFICATION_CACHE_VERSION}|{Path(path).resolve()}|{stat.st_mtime_ns}|{stat.st_size}"
+    )
 
 
 def _existing_recording_id(tags: dict[str, str]) -> str:
@@ -52,14 +59,20 @@ def _unidentified_evidence(
     )
 
 
-def _matched_evidence(path: str, matched: dict) -> RecordingEvidence:
+def _matched_evidence(
+    path: str,
+    matched: dict,
+    tags: dict[str, str],
+) -> RecordingEvidence:
     online_title = matched.get("title", "")
     recording_id = matched.get("recording_id", "")
     resolution = reconcile_online_version(path, online_title, recording_id)
-    hint = filename_identity_hint(path)
+    hint = filename_identity_hint(path) or ("", "")
+    local_artist = hint[0] or tags.get("artist", "")
+    local_title = hint[1] or tags.get("title", "")
     return RecordingEvidence(
-        artist=matched.get("artist", "") or (hint[0] if hint else ""),
-        title=resolution.title,
+        artist=prefer_latin_text(local_artist, matched.get("artist", "")),
+        title=prefer_latin_text(local_title, resolution.title),
         exact_recording_id=resolution.exact_recording_id,
         derived_from_recording_id=resolution.derived_from_recording_id,
         acoustid_score=matched.get("score"),
@@ -108,7 +121,7 @@ def identify(
         )
         cache.set("identification", key, evidence.to_dict(), ttl_seconds=86400)
         return evidence
-    evidence = _matched_evidence(path, matched)
+    evidence = _matched_evidence(path, matched, source_tags)
     cache.set("identification", key, evidence.to_dict())
     return evidence
 

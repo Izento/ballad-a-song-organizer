@@ -61,6 +61,32 @@ def test_release_selection_uses_earliest_official_non_compilation_without_eviden
     assert "earliest official" in warnings[0]
 
 
+def test_release_selection_prefers_latin_metadata_without_local_evidence():
+    candidate, _warnings = musicbrainz.select_release(
+        [
+            {
+                "id": "japanese-release",
+                "title": "Album",
+                "status": "Official",
+                "date": "1999-01-01",
+                "text-representation": {"language": "jpn", "script": "Jpan"},
+                "release-group": {"primary-type": "Album"},
+            },
+            {
+                "id": "english-release",
+                "title": "Album",
+                "status": "Official",
+                "date": "2000-01-01",
+                "text-representation": {"language": "eng", "script": "Latn"},
+                "release-group": {"primary-type": "Album"},
+            },
+        ]
+    )
+
+    assert candidate is not None
+    assert candidate.release_id == "english-release"
+
+
 def test_enrich_recording_maps_verified_release_fields(monkeypatch):
     recording_includes = []
     recording_response = {
@@ -137,6 +163,38 @@ def test_enrich_recording_maps_verified_release_fields(monkeypatch):
     # Genres are folksonomy tags served alongside "tags" without needing a
     # separate include -- a legitimate one should still come through.
     assert result.values["genre"] == ["Electronic"]
+
+
+def test_metadata_prefers_latin_release_track_text():
+    values = musicbrainz._metadata_from_release(
+        {
+            "title": "日本語の曲",
+            "artist-credit": [{"artist": {"name": "日本のアーティスト"}}],
+        },
+        {
+            "title": "Album",
+            "artist-credit": [{"artist": {"name": "日本のアーティスト"}}],
+            "medium-list": [
+                {
+                    "position": "1",
+                    "track-count": 1,
+                    "track-list": [
+                        {
+                            "number": "1",
+                            "title": "English Song",
+                            "artist-credit": [{"artist": {"name": "English Artist"}}],
+                            "recording": {"id": "recording"},
+                        }
+                    ],
+                }
+            ],
+            "medium-count": 1,
+        },
+        "recording",
+    )
+
+    assert values["artist"] == "English Artist"
+    assert values["title"] == "English Song"
 
 
 def test_artist_credit_name_joins_with_provided_joinphrase():

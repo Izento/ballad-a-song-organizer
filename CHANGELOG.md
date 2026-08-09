@@ -3,6 +3,15 @@
 All notable Ballad releases are recorded here. The early release numbers are
 retrospective milestone labels assigned to the existing Git history.
 
+## [1.4.4] — 2026-08-09
+
+**English metadata preference and identification safety**
+
+- Preferred matching English/Latin metadata over unrelated non-Latin variants.
+- Preserved meaningful local English artist and title fields during enrichment.
+- Kept AcoustID-detected OC ReMix files in game-first format and credited the remixer separately.
+- Invalidated cached identification results after changing provider selection behavior.
+
 ## [1.4.3] — 2026-08-08
 
 **OC ReMix metadata correction**

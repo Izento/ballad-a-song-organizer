@@ -176,3 +176,34 @@ def test_lookup_prefers_exact_filename_title_in_conflicting_match(monkeypatch):
 
     assert result["recording_id"] == "correct-recording"
     assert result["title"] == "Troublesome"
+
+
+def test_select_recording_prefers_local_latin_identity_before_source_count():
+    response = {
+        "status": "ok",
+        "results": [
+            {
+                "score": 0.99,
+                "recordings": [
+                    {
+                        "id": "japanese-recording",
+                        "title": "日本語の曲",
+                        "artists": [{"name": "Artist"}],
+                        "sources": 500,
+                    },
+                    {
+                        "id": "english-recording",
+                        "title": "English Song",
+                        "artists": [{"name": "Artist"}],
+                        "sources": 1,
+                    },
+                ],
+            }
+        ],
+    }
+
+    selected = acoustid._select_recording(response, "Artist - English Song.mp3")
+
+    assert selected is not None
+    _score, recording = selected
+    assert recording["id"] == "english-recording"

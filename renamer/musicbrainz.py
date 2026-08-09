@@ -15,6 +15,7 @@ from .domain.metadata import CanonicalMetadata
 from .filename_parser import normalize_text, split_features
 from .online import RateLimiter
 from .online.cache import enrichment_cache
+from .track_identity import prefer_latin_text
 
 if TYPE_CHECKING:
     from .track_extraction import TrackInfo
@@ -36,6 +37,8 @@ class ReleaseCandidate:
     date: str = ""
     status: str = ""
     country: str = ""
+    language: str = ""
+    script: str = ""
     release_group_type: str = ""
     score: int = 0
     reasons: tuple[str, ...] = ()
@@ -154,17 +157,18 @@ def _track_by_number(
         if int(track.get("position", -1)) == track_num:
             rec = track.get("recording", {})
             artist_credits = rec.get("artist-credit", [])
-            artist_name = artist_hint
-            if artist_credits and isinstance(artist_credits[0], dict):
-                artist_name = (
-                    artist_credits[0]
-                    .get("artist", {})
-                    .get(
-                        "name",
-                        artist_hint,
-                    )
-                )
-            return {"artist": artist_name, "title": rec.get("title", "")}
+            provider_artist = _artist_credit_name(artist_credits) if artist_credits else ""
+            track_artist = _artist_credit_name(track.get("artist-credit"))
+            artist_name = prefer_latin_text(
+                artist_hint,
+                track_artist or provider_artist or artist_hint,
+            )
+            provider_title = str(rec.get("title") or "")
+            track_title = str(track.get("title") or "")
+            return {
+                "artist": artist_name,
+                "title": prefer_latin_text(provider_title, track_title or provider_title),
+            }
     return None
 
 
@@ -408,6 +412,9 @@ def _candidate_score(
     album = str(local_evidence.get("album") or "")
     album_artist = str(local_evidence.get("album_artist") or "")
     release_artist = _artist_credit_name(release.get("artist-credit"))
+    text_representation = release.get("text-representation") or {}
+    language = str(text_representation.get("language") or "")
+    script = str(text_representation.get("script") or "")
 
     if status.casefold() == "official":
         score += 20
@@ -428,6 +435,12 @@ def _candidate_score(
     ):
         score += 35
         reasons.append("matching album artist")
+    if language.casefold() in {"en", "eng"}:
+        score += 8
+        reasons.append("English release metadata")
+    if script.casefold() in {"latn", "latin"}:
+        score += 8
+        reasons.append("Latin-script release metadata")
     if local_evidence.get("musicbrainz_albumid") == release.get("id"):
         score += 1000
         reasons.append("matching embedded release ID")
@@ -438,6 +451,8 @@ def _candidate_score(
         date=str(release.get("date") or ""),
         status=status,
         country=str(release.get("country") or ""),
+        language=language,
+        script=script,
         release_group_type=release_type,
         score=score,
         reasons=tuple(reasons),
@@ -470,7 +485,14 @@ def _canonical_release_selection(
 ) -> tuple[ReleaseCandidate | None, tuple[str, ...]]:
     eligible = _eligible_canonical_releases(candidates)
     if eligible:
-        return _earliest_release(eligible), (
+        latin_metadata = [
+            candidate
+            for candidate in eligible
+            if candidate.language.casefold() in {"en", "eng"}
+            or candidate.script.casefold() in {"latn", "latin"}
+        ]
+        selected = _earliest_release(latin_metadata or eligible)
+        return selected, (
             "No local release evidence; selected the earliest official non-compilation release.",
         )
     return None, ("No suitable official canonical release; release-specific metadata was skipped.",)
@@ -614,13 +636,14 @@ def _metadata_from_release(
     release: dict,
     recording_id: str,
 ) -> dict[str, object]:
+    recording_title = str(recording.get("title") or "")
     artist, features = _artist_credit_identity(
         recording.get("artist-credit"),
         recording.get("artist-relation-list"),
     )
     values: dict[str, object] = {
         "artist": artist,
-        "title": _title_with_features(recording.get("title", ""), features),
+        "title": _title_with_features(recording_title, features),
         "musicbrainz_recordingid": recording_id,
         "isrc": _values(recording.get("isrc-list"), "id"),
         "genre": _values(recording.get("genre-list")),
@@ -655,6 +678,15 @@ def _metadata_from_release(
     matched = _release_track(release, recording_id)
     if matched is not None:
         medium, track = matched
+        track_artist = _artist_credit_name(track.get("artist-credit"))
+        if track_artist:
+            values["artist"] = prefer_latin_text(artist, track_artist)
+        track_title = str(track.get("title") or "")
+        if track_title:
+            values["title"] = _title_with_features(
+                prefer_latin_text(recording_title, track_title),
+                features,
+            )
         values.update(
             {
                 # MusicBrainz's JSON API returns these as ints; on-disk tags

@@ -1,5 +1,6 @@
 # pylint: disable=import-error,protected-access
 
+from renamer import acoustid
 from renamer import track_extraction as extractor
 from renamer.filename_builder import build_filename
 from renamer.track_extraction import TrackInfo, extract_track
@@ -33,6 +34,30 @@ def test_successful_acoustid_match_precedes_readable_tags(tmp_path, monkeypatch)
     assert result.artist == "AcoustID Artist"
     assert result.title == "AcoustID Title"
     assert calls == [("acoustid", str(path), ".mp3", "test-key")]
+
+
+def test_acoustid_ocremix_match_keeps_game_first_and_credits_remixer(tmp_path, monkeypatch):
+    path = tmp_path / "Final Fantasy IV - GroundUp (OC ReMix).mp3"
+    path.write_bytes(b"audio")
+    monkeypatch.setattr(
+        acoustid,
+        "lookup",
+        lambda *_args: {
+            "artist": "FFmusic Dj",
+            "title": "Final Fantasy IV Ground Up OC ReMix",
+            "feat_artists": [],
+            "score": 0.99,
+            "recording_id": "recording",
+        },
+    )
+
+    result = extract_track(str(path), acoustid_key="test-key")
+
+    assert result.is_ocremix
+    assert result.game == "Final Fantasy IV"
+    assert result.title == "GroundUp"
+    assert result.remixers == ("FFmusic Dj",)
+    assert build_filename(result) == "Final Fantasy IV - GroundUp (FFmusic Dj) [OC ReMix].mp3"
 
 
 def test_missing_acoustid_match_falls_back_to_tags(tmp_path, monkeypatch):

@@ -5,8 +5,10 @@ import pytest
 from renamer.domain.issues import ReviewIssue
 from renamer.track_identity import (
     artist_appears_in,
+    has_non_latin_text,
     identity_is_recognizable,
     is_placeholder_artist,
+    prefer_latin_text,
 )
 
 
@@ -128,6 +130,17 @@ def test_identity_mismatch_warning_requires_review():
 )
 def test_placeholder_artists_are_not_valid_identities(artist):
     assert is_placeholder_artist(artist)
+
+
+def test_latin_display_text_wins_over_non_latin_online_text():
+    assert prefer_latin_text("English Title", "日本語の曲") == "English Title"
+    assert prefer_latin_text("Artist", "日本のアーティスト") == "Artist"
+    assert prefer_latin_text("日本語の曲", "English Title") == "English Title"
+
+
+def test_script_detection_ignores_punctuation_and_numbers():
+    assert has_non_latin_text("Track 4 (Live)") is False
+    assert has_non_latin_text("日本語の曲") is True
 
 
 @pytest.mark.parametrize(
