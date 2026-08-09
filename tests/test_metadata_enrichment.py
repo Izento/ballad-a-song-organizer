@@ -64,6 +64,63 @@ def test_metadata_enrichment_coordinates_filename_and_tags(tmp_path, monkeypatch
     assert tags[0].after["musicbrainz_recordingid"] == "recording"
 
 
+def test_ocremix_enrichment_preserves_game_title_and_records_remixer(
+    tmp_path,
+    monkeypatch,
+):
+    source = tmp_path / "Aeroz - The 7th Guest OC ReMix (OC ReMix).mp3"
+    source.write_bytes(b"audio")
+    monkeypatch.setattr(
+        review_api,
+        "read_media",
+        lambda path: MediaRead(
+            path=path,
+            status="ok",
+            container="MP3",
+            tags={"artist": "Aeroz", "title": "The 7th Guest OC ReMix (OC ReMix)"},
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "identify",
+        lambda *_args, **_kwargs: RecordingEvidence(
+            exact_recording_id="recording",
+            confidence="high",
+        ),
+    )
+    monkeypatch.setattr(
+        review_api,
+        "enrich_recording",
+        lambda *_args, **_kwargs: EnrichmentResult(
+            recording_id="recording",
+            values={
+                "artist": "Chernobague",
+                "title": "The 7th Guest OC ReMix (OC ReMix)",
+                "album": "The 7th Guest",
+                "musicbrainz_recordingid": "recording",
+            },
+            release_id="release",
+            confidence="high",
+        ),
+    )
+
+    renames, tags, issues = review_api.plan_metadata_enrichment(
+        str(tmp_path),
+        recursive=False,
+        include_artwork=False,
+    )
+
+    assert issues == []
+    assert len(renames) == 1
+    assert renames[0].new_path.endswith("Aeroz - The 7th Guest (Chernobague) [OC ReMix].mp3")
+    assert len(tags) == 1
+    assert tags[0].after["artist"] == "Aeroz"
+    assert tags[0].after["title"] == "The 7th Guest (Chernobague)"
+    assert tags[0].after["remixer"] == ["Chernobague"]
+    assert tags[0].after["album_artist"] == "OverClocked ReMix"
+    assert "musicbrainz_recordingid" not in tags[0].after
+
+
 def test_metadata_enrichment_does_not_assign_release_to_local_derivative(
     tmp_path,
     monkeypatch,

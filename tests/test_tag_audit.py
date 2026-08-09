@@ -1,8 +1,12 @@
 # pylint: disable=import-error
 
 from renamer.media import MediaRead
-from renamer.media.legacy_filename import parse_stem
-from renamer.tag_audit import audit_tag_file, audit_tags_for_folder
+from renamer.media.legacy_filename import parse_stem, parsed_tag_values
+from renamer.tag_audit import (
+    audit_tag_file,
+    audit_tags_for_folder,
+    expected_tags_from_filename,
+)
 
 
 def test_filename_is_source_of_truth_for_regular_tags(tmp_path, monkeypatch):
@@ -56,6 +60,52 @@ def test_tag_writer_canonicalizes_ocremix_parentheses_and_extension():
     assert parsed is not None
     assert parsed["title"] == "Song"
     assert parsed["remixers"] == ["Beatdrop"]
+
+
+def test_ocremix_parenthetical_marker_preserves_game_and_remixer():
+    parsed = parse_stem("Game - Song (Beatdrop) (OC ReMix)")
+
+    assert parsed is not None
+    assert parsed["game"] == "Game"
+    assert parsed["title"] == "Song"
+    assert parsed["remixers"] == ["Beatdrop"]
+
+
+def test_ocremix_filename_stores_creator_in_remixer_metadata():
+    expected, _reason = expected_tags_from_filename(
+        "Game - Song (Beatdrop) [OC ReMix].mp3",
+        {},
+    )
+
+    assert expected["artist"] == "Game"
+    assert expected["title"] == "Song (Beatdrop)"
+    assert expected["remixer"] == ["Beatdrop"]
+    assert expected["album_artist"] == "OverClocked ReMix"
+
+
+def test_gamers_delight_ocremix_examples_keep_game_title_and_creator():
+    cases = (
+        (
+            "Zelda II - The Adventure of Link - Temple Trippin' (LaRux) [OC ReMix]",
+            "Zelda II",
+            "The Adventure of Link - Temple Trippin'",
+            "LaRux",
+        ),
+        (
+            "Zombies Ate My Neighbors - Heart Beats (Mazedude) [OC ReMix]",
+            "Zombies Ate My Neighbors",
+            "Heart Beats",
+            "Mazedude",
+        ),
+    )
+
+    for stem, game, title, remixer in cases:
+        parsed = parse_stem(stem)
+        assert parsed is not None
+        values = parsed_tag_values(parsed)
+        assert values["artist"] == game
+        assert values["title"] == f"{title} ({remixer})"
+        assert values["remixer"] == [remixer]
 
 
 def test_unwritable_tag_format_is_an_analysis_issue(tmp_path, monkeypatch):

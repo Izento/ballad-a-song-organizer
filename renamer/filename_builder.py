@@ -1,8 +1,9 @@
 """Build safe, canonical filenames from extracted track metadata."""
 
 import re
+from collections.abc import Iterable
 
-from .filename_parser import normalize_title_text
+from .filename_parser import normalize_text, normalize_title_text
 
 WINDOWS_UNSAFE_RE = re.compile(r'[\x00-\x1f<>"/\\|?*]')
 SUBTITLE_COLON_RE = re.compile(r":\s+")  # "Game: Subtitle" → "Game - Subtitle"
@@ -11,11 +12,28 @@ WINDOWS_RESERVED_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Strips trailing (OC ReMix) / [OC ReMix] / ( OC ReMix ) variants from a title
+# Strips trailing wrapped and bare OC ReMix labels from a title.  A few older
+# filenames contain both forms, so the helper below applies this repeatedly.
 OCREMIX_SUFFIX_RE = re.compile(
-    r"\s*[\(\[]\s*OC\s*Re[Mm]ix\s*[\)\]]\s*$",
+    r"(?:\s*[\(\[]\s*OC[\s_]*Re[Mm]ix\s*[\)\]]|"
+    r"\s+\bOC[\s_]*Re[Mm]ix\b|_OC[\s_]*Re[Mm]ix)\s*$",
     re.IGNORECASE,
 )
+_OCREMIX_CREDIT_SUFFIX_RE = re.compile(
+    r"\s*[\(\[](?P<credits>[^()\[\]]+)[\)\]]\s*$",
+)
+
+
+def _normalized_remixers(values: Iterable[str]) -> tuple[str, ...]:
+    names: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        name = normalize_title_text(str(value))
+        key = normalize_text(name)
+        if name and key not in seen:
+            names.append(name)
+            seen.add(key)
+    return tuple(names)
 
 
 def safe_part(s: str) -> str:
@@ -55,7 +73,32 @@ def split_feat(raw: str) -> tuple[str, list[str]]:
 
 
 def strip_ocremix_suffix(title: str) -> str:
-    return OCREMIX_SUFFIX_RE.sub("", title).strip()
+    cleaned = title or ""
+    while True:
+        stripped = OCREMIX_SUFFIX_RE.sub("", cleaned).strip()
+        if stripped == cleaned:
+            return stripped
+        cleaned = stripped
+
+
+def strip_ocremix_remixer(title: str, remixers: Iterable[str]) -> str:
+    clean = strip_ocremix_suffix(normalize_title_text(title))
+    names = _normalized_remixers(remixers)
+    match = _OCREMIX_CREDIT_SUFFIX_RE.search(clean)
+    if not names or match is None:
+        return clean
+    existing = _normalized_remixers(match.group("credits").split(","))
+    if tuple(normalize_text(name) for name in existing) == tuple(
+        normalize_text(name) for name in names
+    ):
+        return clean[: match.start()].rstrip()
+    return clean
+
+
+def format_ocremix_title(title: str, remixers: Iterable[str]) -> str:
+    names = _normalized_remixers(remixers)
+    clean = strip_ocremix_remixer(title, names)
+    return f"{clean} ({', '.join(names)})" if names else clean
 
 
 def build_filename(track) -> str:
@@ -73,19 +116,12 @@ def build_filename(track) -> str:
 def _ocremix_name(track) -> str:
     game = safe_part(track.game) if track.game else "Unknown Game"
     title = (
-        safe_part(strip_ocremix_suffix(normalize_title_text(track.title)))
+        safe_part(strip_ocremix_remixer(track.title, track.remixers))
         if track.title
         else "Unknown Title"
     )
 
-    remixers = []
-    seen = set()
-    for remixer in track.remixers:
-        cleaned = normalize_title_text(remixer)
-        key = cleaned.casefold()
-        if cleaned and key not in seen:
-            remixers.append(safe_part(cleaned))
-            seen.add(key)
+    remixers = [safe_part(name) for name in _normalized_remixers(track.remixers)]
     if remixers:
         remixer_str = ", ".join(remixers)
         return f"{game} - {title} ({remixer_str}) [OC ReMix]"

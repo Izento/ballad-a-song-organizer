@@ -5,11 +5,12 @@ from __future__ import annotations
 import os
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from .domain.issues import ReviewIssue
 from .filename_parser import format_title, parse_regular_stem
 from .media import read_media, supports_tag_writing
-from .media.legacy_filename import parse_stem
+from .media.legacy_filename import parse_stem, parsed_tag_values
 from .review_models import FileSnapshot, TagProposal, path_key, proposal_id
 
 
@@ -35,43 +36,27 @@ def plan_tag_updates(
 
 def expected_tags_from_filename(
     path: str,
-    current: dict[str, str],
-) -> tuple[dict[str, str], str]:
+    current: dict[str, Any],
+) -> tuple[dict[str, Any], str]:
     """Return canonical tag values represented by a supported filename."""
     if not supports_tag_writing(path):
         extension = Path(path).suffix.lower() or "this file type"
         raise ValueError(f"Tag writing is not supported for {extension} files")
     stem = Path(path).stem
     parsed = parse_stem(stem)
-    if parsed is not None and parsed["is_ocremix"]:
+    if parsed is not None:
         expected = dict(current)
-        expected.update(
-            {
-                "artist": parsed["game"],
-                "title": parsed["title"],
-                "album": parsed["game"],
-                "album_artist": "OverClocked ReMix",
-                "grouping": parsed["game"],
-                "subtitle": ", ".join(parsed["remixers"]),
-            }
-        )
-        return expected, "Filename provides the source-specific display fields."
+        expected.update(parsed_tag_values(parsed))
+        if parsed["is_ocremix"]:
+            return expected, "Filename provides the source-specific display fields."
+        return expected, "Filename provides explicit artist, title, and feature metadata."
 
     regular = parse_regular_stem(stem)
-    if regular is not None:
-        expected = dict(current)
-        expected.update(
-            {
-                "artist": regular.artist,
-                "title": format_title(regular),
-            }
-        )
-        return expected, "Filename provides explicit artist, title, and feature metadata."
-    if parsed is None:
+    if regular is None:
         raise ValueError("Filename is not in a supported music naming format")
     expected = dict(current)
-    expected.update({"artist": parsed["artist"], "title": parsed["full_title"]})
-    return expected, "Filename provides explicit artist and title metadata."
+    expected.update({"artist": regular.artist, "title": format_title(regular)})
+    return expected, "Filename provides explicit artist, title, and feature metadata."
 
 
 def audit_tag_file(path: str) -> TagProposal | None:

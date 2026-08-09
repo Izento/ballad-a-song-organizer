@@ -3,6 +3,15 @@
 All notable Ballad releases are recorded here. The early release numbers are
 retrospective milestone labels assigned to the existing Git history.
 
+## [1.4.3] — 2026-08-08
+
+**OC ReMix metadata correction**
+
+- Kept game-first Artist, Album, and Grouping metadata.
+- Preserved the mix creator in the parenthesized title and dedicated Remixer field.
+- Removed duplicate `OC ReMix` markers and prevented duplicate remixer parentheses.
+- Prevented generic MusicBrainz source metadata and artwork from overwriting OC ReMix identity.
+
 ## [1.4.2] — 2026-08-08
 
 **Current release candidate** built on the static-quality milestone

@@ -59,6 +59,8 @@ def metadata_differences(proposal) -> tuple[tuple[str, object, object], ...]:
         ("Artist", before.get("artist"), after.get("artist")),
         ("Title", before.get("title"), after.get("title")),
         ("Album", before.get("album"), after.get("album")),
+        ("Album Artist", before.get("album_artist"), after.get("album_artist")),
+        ("Remixer", before.get("remixer"), after.get("remixer")),
         ("Track", before.get("track_number"), after.get("track_number")),
     )
 

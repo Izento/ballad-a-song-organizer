@@ -22,6 +22,7 @@ RICH_TAGS = {
     "date": "2024-04-05",
     "genre": ["Electronic", "House"],
     "composer": ["Composer One", "Composer Two"],
+    "remixer": ["Remixer One", "Remixer Two"],
     "musicbrainz_recordingid": "recording-id",
     "musicbrainz_albumid": "release-id",
     "release_country": "US",
@@ -61,6 +62,7 @@ def test_supported_container_round_trips_canonical_metadata(tmp_path, extension)
         "release_type",
     ):
         assert media.tags[field] == str(RICH_TAGS[field])
+    assert set(media.tags["remixer"]) == {"Remixer One", "Remixer Two"}
     assert set(media.tags["genre"]) == {
         "Electronic",
         "House",
@@ -127,6 +129,7 @@ def test_mp3_writer_embeds_rich_tags_and_front_art(tmp_path):
             "title": "Title",
             "tracknumber": "2",
             "genre": ["Electronic", "House"],
+            "remixer": ["Remixer One", "Remixer Two"],
             "musicbrainz_recordingid": "recording-id",
         },
         {
@@ -142,5 +145,6 @@ def test_mp3_writer_embeds_rich_tags_and_front_art(tmp_path):
     # are joined with "; " on write (chosen because it won't collide with
     # real tag/credit text the way "/" can -- e.g. the genre "hip-hop/rap").
     assert tags["TCON"].text == ["Electronic; House"]
+    assert tags["TPE4"].text == ["Remixer One; Remixer Two"]
     assert tags["TXXX:MUSICBRAINZ_RECORDINGID"].text == ["recording-id"]
     assert tags.getall("APIC")[0].data == b"\xff\xd8\xffcover"

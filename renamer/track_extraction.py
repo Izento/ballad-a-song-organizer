@@ -5,12 +5,13 @@ import re
 from dataclasses import replace
 
 from .domain.evidence import ExtractedTrack
-from .filename_builder import split_feat, strip_ocremix_suffix
+from .filename_builder import split_feat, strip_ocremix_remixer, strip_ocremix_suffix
 from .filename_parser import (
     normalize_title_text,
     parse_regular_stem,
 )
 from .media import read_media
+from .media.legacy_filename import parse_stem
 from .track_identity import reconcile_online_version
 
 AUDIO_EXTENSIONS = {
@@ -73,6 +74,7 @@ def _read_tags(path: str) -> dict:
             "TIT2": tags.get("title", ""),
             "TALB": tags.get("album", ""),
             "TPE2": tags.get("album_artist", ""),
+            "TPE4": tags.get("remixer", ""),
             "TIT1": tags.get("grouping", ""),
             "TIT3": tags.get("subtitle", ""),
         }.items()
@@ -81,7 +83,7 @@ def _read_tags(path: str) -> dict:
 
 
 _OCREMIX_SUFFIX_RE = re.compile(
-    r"[\(\[]\s*OC\s*Re[Mm]ix\s*[\)\]]\s*$",
+    r"[\(\[]\s*OC[\s_]*Re[Mm]ix\s*[\)\]]\s*$",
     re.IGNORECASE,
 )
 
@@ -92,6 +94,8 @@ def _detect_ocremix(tags: dict, filename: str) -> bool:
         return True
     if _OCREMIX_SUFFIX_RE.search(stem):  # (OC ReMix) or [OC ReMix] in filename
         return True
+    if strip_ocremix_suffix(stem) != stem:  # Also tolerate a bare label or duplicates.
+        return True
     if "ocremix" in tags.get("TALB", "").lower():
         return True
     if tags.get("TPE2", "") == "OverClocked ReMix":
@@ -99,27 +103,36 @@ def _detect_ocremix(tags: dict, filename: str) -> bool:
     return "OC ReMix" in tags.get("TIT2", "")
 
 
-def _split_ocremix_artists(raw: str) -> list[str]:
+def _split_ocremix_artists(raw: object) -> list[str]:
     """
     Split OC ReMix TPE1 into individual remixer names.
     Handles both comma separation and 'feat.' notation within the artist field:
       'ArtistA feat. ArtistB, ArtistC' → ['ArtistA', 'ArtistB', 'ArtistC']
     """
-    feat_parts = re.split(r"\s+(?:feat(?:uring)?\.?|ft\.?)\s+", raw, flags=re.IGNORECASE)
     result = []
-    for part in feat_parts:
-        result.extend(
-            normalize_title_text(artist) for artist in re.split(r",\s*", part) if artist.strip()
+    raw_values = raw if isinstance(raw, (list, tuple, set, frozenset)) else (raw,)
+    for value in raw_values:
+        feat_parts = re.split(
+            r"\s+(?:feat(?:uring)?\.?|ft\.?)\s+",
+            str(value),
+            flags=re.IGNORECASE,
         )
+        for part in feat_parts:
+            result.extend(
+                normalize_title_text(artist) for artist in re.split(r",\s*", part) if artist.strip()
+            )
     return result
 
 
 def _from_ocremix_new_tags(path: str, ext: str, tags: dict) -> TrackInfo:
     """Read the legacy OC ReMix Collection tag layout."""
     game = normalize_title_text(tags.get("TIT1", "").strip())
-    title = normalize_title_text(strip_ocremix_suffix(tags.get("TIT3", "").strip()))
     artists_raw = tags.get("TPE1", "").strip()
     remixers = _split_ocremix_artists(artists_raw)
+    title = strip_ocremix_remixer(
+        tags.get("TIT3", "").strip(),
+        remixers,
+    )
     return TrackInfo(
         path=path,
         ext=ext,
@@ -132,12 +145,13 @@ def _from_ocremix_new_tags(path: str, ext: str, tags: dict) -> TrackInfo:
 
 
 def _from_ocremix_writer_tags(path: str, ext: str, tags: dict) -> TrackInfo:
-    """Read the schema written by the canonical tag writer without reinterpreting TIT3."""
+    """Read canonical OC ReMix tags, preferring the dedicated remixer field."""
     game = normalize_title_text(
         (tags.get("TPE1") or tags.get("TALB") or tags.get("TIT1", "")).strip()
     )
-    title = normalize_title_text(strip_ocremix_suffix(tags.get("TIT2", "").strip()))
-    remixers = _split_ocremix_artists(tags.get("TIT3", "").strip())
+    remixer_value = tags.get("TPE4") or tags.get("TIT3", "")
+    remixers = _split_ocremix_artists(remixer_value)
+    title = strip_ocremix_remixer(tags.get("TIT2", "").strip(), remixers)
     return TrackInfo(
         path=path,
         ext=ext,
@@ -217,6 +231,19 @@ def _from_filename(path: str, ext: str, is_ocremix: bool) -> TrackInfo:
 
 def _from_ocremix_filename(path: str, ext: str, stem: str) -> TrackInfo:
     """OC ReMix file with no usable tags — parse game/title from filename."""
+    parsed = parse_stem(stem)
+    if parsed is not None and parsed["is_ocremix"]:
+        return TrackInfo(
+            path=path,
+            ext=ext,
+            is_ocremix=True,
+            game=parsed["game"],
+            title=parsed["title"],
+            remixers=parsed["remixers"],
+            needs_lookup=True,
+            strategy="ocremix_filename",
+        )
+
     clean = OCREMIX_STEM_RE.sub("", stem).replace("_", " ")
     clean = strip_ocremix_suffix(clean).strip()
 

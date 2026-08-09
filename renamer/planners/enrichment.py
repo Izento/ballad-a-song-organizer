@@ -14,15 +14,23 @@ from ..acoustid import cache_write_batch
 from ..cover_art import download_front_art
 from ..domain.evidence import Confidence, weakest_confidence
 from ..domain.issues import ReviewIssue
-from ..filename_builder import build_filename, split_feat
+from ..filename_builder import (
+    build_filename,
+    format_ocremix_title,
+    split_feat,
+    strip_ocremix_remixer,
+    strip_ocremix_suffix,
+)
 from ..filename_parser import (
     normalize_text,
+    normalize_title_text,
     parse_regular_filename,
     split_features,
 )
 from ..genre_aliases import normalize_genre_list
 from ..identification import identify
 from ..media import read_media
+from ..media.legacy_filename import parse_stem
 from ..media.schema import expected_metadata, metadata_matches
 from ..musicbrainz import EnrichmentResult, enrich_recording
 from ..qualifiers import preserve_local_versions, remove_safe_noise
@@ -60,6 +68,7 @@ _PROTECTED_LOCAL_TITLE_MARKERS = frozenset({"cypher", "diss", "freestyle", "unre
 _IDENTIFICATION_WORKERS = 4
 _ENRICHMENT_WORKERS = 4
 _ARTWORK_WORKERS = 3
+_OCREMIX_ALBUM_ARTIST = "OverClocked ReMix"
 _LOCAL_CO_ARTIST_RE = re.compile(
     r"\s*(?:&|\band\b|\bx\b|\bvs\.?\b|\bversus\b)\s*",
     re.IGNORECASE,
@@ -130,6 +139,80 @@ def _merge_features(
                 continue
             merged.append(feature)
     return tuple(merged)
+
+
+def _credit_names(value: object) -> tuple[str, ...]:
+    raw_values = value if isinstance(value, (list, tuple, set, frozenset)) else (value,)
+    names: list[str] = []
+    for raw_value in raw_values:
+        clean, features = split_features(str(raw_value or ""))
+        candidates = (clean, *features)
+        for candidate in candidates:
+            for part in re.split(r"\s*[,;]\s*", candidate):
+                normalized = normalize_title_text(part)
+                if normalized and normalize_text(normalized) not in {
+                    normalize_text(existing) for existing in names
+                }:
+                    names.append(normalized)
+    return tuple(names)
+
+
+def _ocremix_metadata(path: str, media) -> dict[str, Any] | None:
+    parsed = parse_stem(Path(path).name)
+    if parsed is not None and parsed["is_ocremix"]:
+        return parsed
+
+    tags = media.tags
+    album_artist = normalize_text(str(tags.get("album_artist") or ""))
+    if album_artist != normalize_text(_OCREMIX_ALBUM_ARTIST):
+        return None
+    game = str(tags.get("grouping") or tags.get("album") or tags.get("artist") or "")
+    title = strip_ocremix_suffix(str(tags.get("title") or ""))
+    if not game or not title:
+        return None
+    return {
+        "is_ocremix": True,
+        "game": normalize_title_text(game),
+        "title": normalize_title_text(title),
+        "remixers": list(_credit_names(tags.get("remixer"))),
+    }
+
+
+def _ocremix_values(metadata: dict[str, Any], media, enriched) -> dict[str, Any]:
+    game = normalize_title_text(str(metadata.get("game") or ""))
+    title = normalize_title_text(strip_ocremix_suffix(str(metadata.get("title") or "")))
+    values: dict[str, Any] = {
+        "artist": game,
+        "title": title,
+        "album": game,
+        "album_artist": _OCREMIX_ALBUM_ARTIST,
+        "grouping": game,
+    }
+    remixers = _credit_names(metadata.get("remixers"))
+    if not remixers:
+        remixers = _credit_names(media.tags.get("remixer"))
+    if not remixers and normalize_text(str(media.tags.get("album_artist") or "")) == normalize_text(
+        _OCREMIX_ALBUM_ARTIST
+    ):
+        remixers = _credit_names(media.tags.get("subtitle"))
+    if not remixers:
+        remixers = _credit_names(enriched.values.get("remixer"))
+    if not remixers:
+        provider_artist = str(enriched.values.get("artist") or "")
+        if (
+            provider_artist
+            and normalize_text(provider_artist) != normalize_text(game)
+            and not is_placeholder_artist(provider_artist)
+        ):
+            remixers = _credit_names(provider_artist)
+    if remixers:
+        values["remixer"] = list(remixers)
+        values["subtitle"] = ", ".join(remixers)
+    else:
+        values["remixer"] = []
+        values["subtitle"] = ""
+    values["title"] = format_ocremix_title(title, remixers)
+    return values
 
 
 def _title_with_features(title: str, features: tuple[str, ...]) -> str:
@@ -222,6 +305,10 @@ def _preserve_local_coartist(values: dict, media) -> dict:
 
 
 def _enriched_values(path, media, evidence, enriched):
+    ocremix = _ocremix_metadata(path, media)
+    if ocremix is not None:
+        return _ocremix_values(ocremix, media, enriched)
+
     values = dict(enriched.values)
     filename = parse_regular_filename(Path(path).name)
     local_title = filename.title if filename is not None else media.tags.get("title", "")
@@ -280,6 +367,27 @@ def _tag_proposal(
     )
 
 
+def _ocremix_rename_track(path: str, media, after: dict) -> TrackInfo | None:
+    metadata = _ocremix_metadata(path, media)
+    if metadata is None:
+        return None
+    game = str(after.get("artist") or metadata.get("game") or "")
+    raw_title = str(after.get("title") or metadata.get("title") or "")
+    remixers = _credit_names(after.get("remixer") or after.get("subtitle"))
+    title = strip_ocremix_remixer(raw_title, remixers)
+    if not game or not title:
+        return None
+    return TrackInfo(
+        path=path,
+        ext=Path(path).suffix,
+        is_ocremix=True,
+        game=game,
+        title=title,
+        remixers=remixers,
+        strategy="musicbrainz",
+    )
+
+
 def _rename_proposal(
     path: str,
     *,
@@ -291,33 +399,37 @@ def _rename_proposal(
     warnings: tuple[str, ...],
     confidence: str,
 ) -> RenameProposal | None:
-    artist = str(after.get("artist") or "")
-    title = str(after.get("title") or "")
-    if not artist or not title:
-        return None
-    local_features = _local_feature_names(
-        parse_regular_filename(Path(path).name),
-        media,
-    )
-    artist = _remove_named_features(artist, local_features)
-    # Feature credits may live in the enriched artist string (an
-    # under-specified MusicBrainz artist-credit join), the enriched title
-    # (some recordings keep "(feat. X)" inline), or both. Extract from both
-    # and merge instead of also reusing the *original* filename's feature
-    # list, which would double up on the same name.
-    artist, artist_features = split_feat(artist)
-    title, title_features = split_feat(title)
-    if not artist or is_placeholder_artist(artist):
-        return None
-    feat_artists = _merge_features(artist_features, title_features)
-    track = TrackInfo(
-        path=path,
-        ext=Path(path).suffix,
-        artist=artist,
-        title=title,
-        feat_artists=feat_artists,
-        strategy="musicbrainz",
-    )
+    ocremix_track = _ocremix_rename_track(path, media, after)
+    if ocremix_track is not None:
+        track = ocremix_track
+    else:
+        artist = str(after.get("artist") or "")
+        title = str(after.get("title") or "")
+        if not artist or not title:
+            return None
+        local_features = _local_feature_names(
+            parse_regular_filename(Path(path).name),
+            media,
+        )
+        artist = _remove_named_features(artist, local_features)
+        # Feature credits may live in the enriched artist string (an
+        # under-specified MusicBrainz artist-credit join), the enriched title
+        # (some recordings keep "(feat. X)" inline), or both. Extract from both
+        # and merge instead of also reusing the *original* filename's feature
+        # list, which would double up on the same name.
+        artist, artist_features = split_feat(artist)
+        title, title_features = split_feat(title)
+        if not artist or is_placeholder_artist(artist):
+            return None
+        feat_artists = _merge_features(artist_features, title_features)
+        track = TrackInfo(
+            path=path,
+            ext=Path(path).suffix,
+            artist=artist,
+            title=title,
+            feat_artists=feat_artists,
+            strategy="musicbrainz",
+        )
     new_name = build_filename(track)
     if Path(path).name == new_name:
         return None
@@ -341,6 +453,14 @@ def _rename_proposal(
 
 def _local_identities(path: str, media) -> tuple[tuple[str, str], ...]:
     """Each claim the file itself makes about what song it is."""
+    ocremix = _ocremix_metadata(path, media)
+    if ocremix is not None:
+        return (
+            (
+                str(ocremix.get("game") or ""),
+                str(ocremix.get("title") or ""),
+            ),
+        )
     hint = filename_identity_hint(path) or ("", "")
     claims = (
         (str(media.tags.get("artist") or ""), str(media.tags.get("title") or "")),
@@ -644,6 +764,7 @@ def _artwork_requests(
         if (
             enriched is None
             or candidate.evidence.is_derivative
+            or _ocremix_metadata(candidate.path, candidate.media) is not None
             or candidate.media.artwork is not None
             or not enriched.release_id
         ):
@@ -737,8 +858,12 @@ def _merged_after(media, values: dict) -> dict:
     return after
 
 
-def _planned_artwork(media, evidence, enriched, artwork_by_release):
-    if evidence.is_derivative or media.artwork is not None:
+def _planned_artwork(path, media, evidence, enriched, artwork_by_release):
+    if (
+        evidence.is_derivative
+        or _ocremix_metadata(path, media) is not None
+        or media.artwork is not None
+    ):
         return None
     return artwork_by_release.get(enriched.release_id)
 
@@ -786,6 +911,7 @@ def _plan_identified_file(
     if is_placeholder_artist(artist):
         return _placeholder_identity_plan(path, artist)
     artwork_after = _planned_artwork(
+        path,
         media,
         evidence,
         enriched,

@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from renamer.filename_builder import build_filename, safe_part
+from renamer.filename_builder import build_filename, safe_part, strip_ocremix_suffix
 
 
 def test_windows_reserved_and_control_names_are_safe():
@@ -23,3 +23,21 @@ def test_build_filename_emits_one_extension_and_clean_features():
     )
 
     assert build_filename(track) == "Artist - Song (feat. Guest).mp3"
+
+
+def test_strip_ocremix_suffix_removes_wrapped_and_bare_duplicates():
+    title = "Song OC ReMix (OC ReMix)"
+
+    assert strip_ocremix_suffix(title) == "Song"
+
+
+def test_ocremix_filename_does_not_duplicate_existing_remixer_parentheses():
+    track = SimpleNamespace(
+        ext=".mp3",
+        is_ocremix=True,
+        game="Game",
+        title="Song (Beatdrop)",
+        remixers=["Beatdrop"],
+    )
+
+    assert build_filename(track) == "Game - Song (Beatdrop) [OC ReMix].mp3"

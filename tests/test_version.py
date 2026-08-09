@@ -6,7 +6,7 @@ from renamer.version import __version__
 
 
 def test_release_version_is_shared_across_application_surfaces():
-    assert __version__ == "1.4.2"
+    assert __version__ == "1.4.3"
     assert public_version == __version__
     assert __version__ == APP_VERSION
     assert f"Ballad {__version__}" == GUI_TITLE
@@ -18,4 +18,4 @@ def test_cli_exposes_release_version(capsys):
     except SystemExit as exc:
         assert exc.code == 0
 
-    assert capsys.readouterr().out.strip() == "ballad 1.4.2"
+    assert capsys.readouterr().out.strip() == "ballad 1.4.3"

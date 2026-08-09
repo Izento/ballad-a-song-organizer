@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
+from ..filename_builder import format_ocremix_title, strip_ocremix_suffix
 from ..filename_parser import (
     format_title,
     normalize_title_text,
@@ -11,8 +13,7 @@ from ..filename_parser import (
     strip_audio_extensions,
 )
 
-_OCREMIX_RE = re.compile(r"\[OC\s*Re[Mm]ix\]", re.IGNORECASE)
-_OCREMIX_LABEL_RE = re.compile(r"\bOC\s*Re[Mm]ix\b", re.IGNORECASE)
+_OCREMIX_LABEL_RE = re.compile(r"\bOC[\s_]*Re[Mm]ix\b", re.IGNORECASE)
 _VERSION_LABEL_RE = re.compile(
     r"\b(?:acoustic|album|clean|club|demo|edit|extended|instrumental|"
     r"karaoke|live|mix|mono|original|radio|remaster(?:ed)?|reprise|"
@@ -58,8 +59,9 @@ def _is_version_label(text: str) -> bool:
 def parse_stem(stem: str) -> dict | None:
     """Parse a legacy supported filename into canonical tag components."""
     stem = strip_audio_extensions(stem)
-    if _OCREMIX_RE.search(stem):
-        clean = normalize_title_text(_OCREMIX_RE.sub("", stem).strip())
+    clean = strip_ocremix_suffix(stem)
+    if clean != stem:
+        clean = normalize_title_text(clean)
         if " - " not in clean:
             return None
         game, rest = clean.split(" - ", 1)
@@ -92,7 +94,7 @@ def parse_stem(stem: str) -> dict | None:
     }
 
 
-def parsed_tag_values(parsed: dict) -> dict[str, str]:
+def parsed_tag_values(parsed: dict) -> dict[str, Any]:
     if not parsed["is_ocremix"]:
         return {
             "artist": parsed["artist"],
@@ -100,10 +102,13 @@ def parsed_tag_values(parsed: dict) -> dict[str, str]:
         }
     return {
         "artist": parsed["game"],
-        "title": parsed["title"],
+        "title": format_ocremix_title(parsed["title"], parsed["remixers"]),
         "album": parsed["game"],
         "album_artist": "OverClocked ReMix",
         "grouping": parsed["game"],
+        "remixer": parsed["remixers"],
+        # Keep the historical subtitle value for players that do not expose
+        # the dedicated remixer field.
         "subtitle": ", ".join(parsed["remixers"]),
     }
 

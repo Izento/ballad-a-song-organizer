@@ -86,6 +86,19 @@ def test_square_bracket_ocremix_filename_keeps_game_first(tmp_path, monkeypatch)
     assert build_filename(result) == "Aeroz - The 7th Guest [OC ReMix].mp3"
 
 
+def test_parenthetical_ocremix_filename_keeps_game_and_remixer(tmp_path, monkeypatch):
+    path = tmp_path / "Aeroz - The 7th Guest (Chernobague) (OC ReMix).mp3"
+    monkeypatch.setattr(extractor, "_read_tags", lambda _path: {})
+
+    result = extract_track(str(path))
+
+    assert result.is_ocremix
+    assert result.game == "Aeroz"
+    assert result.title == "The 7th Guest"
+    assert result.remixers == ("Chernobague",)
+    assert build_filename(result) == "Aeroz - The 7th Guest (Chernobague) [OC ReMix].mp3"
+
+
 def test_explicit_filename_strategy_still_overrides_acoustid(tmp_path, monkeypatch):
     path = tmp_path / "Filename Artist - Filename Title.mp3"
     path.write_bytes(b"audio")
