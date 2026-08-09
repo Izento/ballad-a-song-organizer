@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 from collections.abc import Sequence
 
+from renamer.version import __version__
+
 
 def _add_folder_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
@@ -110,6 +112,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="ballad",
         description="Review-first music library organizer.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     commands = parser.add_subparsers(dest="command", title="commands")
     commands.add_parser("gui", help="Open the desktop application.")

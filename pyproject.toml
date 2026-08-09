@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ballad-a-song-organizer"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Review-first music library organizer"
 requires-python = ">=3.11"
 dependencies = [
@@ -67,3 +67,6 @@ packages = [
 
 [tool.setuptools.package-dir]
 ballad = "src/ballad"
+
+[tool.setuptools.dynamic]
+version = { attr = "renamer.version.__version__" }

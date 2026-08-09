@@ -1,6 +1,7 @@
 # pylint: disable=import-error,protected-access
 
 from renamer import track_extraction as extractor
+from renamer.filename_builder import build_filename
 from renamer.track_extraction import TrackInfo, extract_track
 
 
@@ -71,6 +72,18 @@ def test_missing_acoustid_key_skips_lookup_and_uses_tags(tmp_path, monkeypatch):
     assert result.strategy == "tag_based"
     assert result.artist == "Tagged Artist"
     assert result.title == "Tagged Title"
+
+
+def test_square_bracket_ocremix_filename_keeps_game_first(tmp_path, monkeypatch):
+    path = tmp_path / "Aeroz - The 7th Guest [OC ReMix].mp3"
+    monkeypatch.setattr(extractor, "_read_tags", lambda _path: {})
+
+    result = extract_track(str(path))
+
+    assert result.is_ocremix
+    assert result.game == "Aeroz"
+    assert result.title == "The 7th Guest"
+    assert build_filename(result) == "Aeroz - The 7th Guest [OC ReMix].mp3"
 
 
 def test_explicit_filename_strategy_still_overrides_acoustid(tmp_path, monkeypatch):

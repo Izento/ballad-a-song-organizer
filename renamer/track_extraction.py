@@ -80,14 +80,17 @@ def _read_tags(path: str) -> dict:
     }
 
 
-_OCREMIX_PAREN_RE = re.compile(r"\(\s*OC\s*Re[Mm]ix\s*\)", re.IGNORECASE)
+_OCREMIX_SUFFIX_RE = re.compile(
+    r"[\(\[]\s*OC\s*Re[Mm]ix\s*[\)\]]\s*$",
+    re.IGNORECASE,
+)
 
 
 def _detect_ocremix(tags: dict, filename: str) -> bool:
     stem = os.path.splitext(filename)[0]
     if OCREMIX_STEM_RE.search(stem):  # _OC_ReMix suffix (collection format)
         return True
-    if _OCREMIX_PAREN_RE.search(stem):  # (OC ReMix) in filename (Gamer's Delight)
+    if _OCREMIX_SUFFIX_RE.search(stem):  # (OC ReMix) or [OC ReMix] in filename
         return True
     if "ocremix" in tags.get("TALB", "").lower():
         return True

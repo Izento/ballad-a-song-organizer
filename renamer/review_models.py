@@ -20,8 +20,9 @@ from .domain.metadata import (
     StagedArtwork,
     artwork_to_dict,
 )
+from .version import __version__
 
-APP_VERSION = "0.1.0"
+APP_VERSION = __version__
 PLAN_SCHEMA_VERSION = 2
 
 

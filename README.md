@@ -157,6 +157,21 @@ The package includes `fpcalc.exe`, `.env.example`, `LICENSE`,
 `.env`. The pinned version and checksum are recorded in `chromaprint.json`;
 update them together only after reviewing a new official Chromaprint release.
 
+## Versioning
+
+Ballad follows semantic versioning. The current release is exposed by
+`ballad --version`, shown in the desktop window title, and stored in
+`renamer/version.py`; the package metadata reads from that same source.
+Retrospective release milestones are documented in
+[`CHANGELOG.md`](CHANGELOG.md).
+
+For a future release:
+
+1. Update `__version__` in `renamer/version.py`.
+2. Add the user-facing changes to `CHANGELOG.md`.
+3. Run the development checks below and rebuild both release packages.
+4. Commit the release metadata, then create an annotated `vX.Y.Z` tag.
+
 ## Safety
 
 - Analysis is read-only until selected changes are confirmed.

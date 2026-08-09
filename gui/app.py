@@ -41,8 +41,9 @@ from renamer.runtime import (
     resolve_fpcalc,
     resource_path,
 )
+from renamer.version import __version__
 
-GUI_TITLE = "Ballad"
+GUI_TITLE = f"Ballad {__version__}"
 _WINDOWS_APP_ID = "Ballad.SongOrganizer"
 
 
